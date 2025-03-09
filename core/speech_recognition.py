@@ -1,13 +1,11 @@
 
 import queue
 import threading
-import wave
-import os
 import json
 from vosk import Model, KaldiRecognizer
 import pyaudio
 
-MODEL_PATH = r"D:\AModel\vosk-model-ru-0.42"
+MODEL_PATH = "vosk"
 
 CHUNK = 1024
 FORMAT = pyaudio.paInt16

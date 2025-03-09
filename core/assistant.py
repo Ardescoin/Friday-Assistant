@@ -1,14 +1,12 @@
-# core/assistant.py
 import threading
 import time
 import g4f
-import sqlite3
+import requests
 from modules.gpt import get_gpt_response
 from modules.protocols import Weekend
-import sys
-from io import StringIO
-import importlib
 import asyncio
+
+BASE_URL = "http://147.45.78.163:8000"  
 
 class Assistant:
     def __init__(self, speech_recognition, text_to_speech):
@@ -20,31 +18,12 @@ class Assistant:
         self.listening_thread = None
         self.weekend = Weekend(self.tts)
         
-        self.dialogue_timeout = 60
+        self.dialogue_timeout = 30
         self.last_command_time = None
         
-        self._initialize_database()
-        self.sr.start_listening()  # Запускаем прослушивание при инициализации
+        print("База данных управляется сервером.")
+        self.sr.start_listening()
 
-    def _initialize_database(self):
-        connection = sqlite3.connect('./db/neural_network_memory.db', isolation_level=None)
-        connection.execute('PRAGMA journal_mode = WAL;')
-        connection.execute('PRAGMA cache_size = -10000;')
-        cursor = connection.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS interactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                command TEXT,
-                prompt TEXT,
-                response TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        cursor.execute('CREATE INDEX IF NOT EXISTS idx_timestamp ON interactions(timestamp)')
-        connection.commit()
-        connection.close()
-        print("База данных и таблица interactions инициализированы.")
-        
     def start_listening_task(self):
         asyncio.run(self.listen_for_command_async())  
     
@@ -58,23 +37,38 @@ class Assistant:
     async def listen_for_command_async(self):
         while self.voice_input_active.is_set() and not self.stop_event.is_set():
             try:
-                command = self.sr.get_command()  # Получаем команду из очереди
-                if command is None:  # Сигнал остановки или таймаут
+                command = self.sr.get_command()  
+                if command is None:  
                     await asyncio.sleep(0.1)
                     continue
                 if command and command.strip():
+                    
+                    if self.last_command_time is not None and (time.time() - self.last_command_time) >= self.dialogue_timeout:
+                        print("Время диалога истекло, перезапуск диалога...")
+                        self.last_command_time = None  
+
                     if (self.last_command_time is None and "пятница" in command.lower()) or \
                     (self.last_command_time is not None and (time.time() - self.last_command_time) < self.dialogue_timeout):
                         
-                        connection = sqlite3.connect('./db/neural_network_memory.db', isolation_level=None)
-                        cursor = connection.cursor()
                         
-                        cursor.execute('SELECT DISTINCT command FROM interactions ORDER BY id DESC')
-                        all_commands = cursor.fetchall()
-                        recent_commands = all_commands[:3]
-                        context = "Контекст моих последних фраз:\n" + \
-                                "\n".join(f"[{i+1}] {cmd[0]}" for i, cmd in enumerate(reversed(recent_commands))) + "\n"
-                        connection.close()
+                        response = requests.get(f"{BASE_URL}/db/get_interactions", params={"limit": 5}, timeout=5)  
+                        if response.status_code == 200:
+                            recent_interactions = response.json()["interactions"]
+                            recent_commands = [interaction[1] for interaction in recent_interactions]  
+                            
+                            unique_commands = []
+                            seen = set()
+                            for cmd in reversed(recent_commands):
+                                if cmd not in seen:
+                                    unique_commands.append(cmd)
+                                    seen.add(cmd)
+                            
+                            unique_commands = unique_commands[-3:]
+                            context = "Контекст моих последних фраз:\n" + \
+                                      "\n".join(f"[{i+1}] {cmd}" for i, cmd in enumerate(unique_commands)) + "\n"
+                        else:
+                            context = "Контекст недоступен из-за ошибки сервера.\n"
+                            print(f"Ошибка при получении контекста: {response.status_code}, {response.text}")
                         print(f"Контекст: {context}")
                         
                         is_first_greeting = "привет" in command.lower() and self.last_command_time is None
@@ -110,8 +104,11 @@ class Assistant:
                         
                         self.last_command_time = time.time()
                     else:
-                        print(f"Пропущено: {command} (нет ключевого слова)")
-                await asyncio.sleep(0.1)  # Короткая пауза перед следующим циклом
+                        print(f"Пропущено: {command} (нет ключевого слова или время диалога истекло)")
+                await asyncio.sleep(0.1)  
+            except requests.exceptions.RequestException as e:
+                print(f"Ошибка соединения с сервером: {e}")
+                await asyncio.sleep(0.1)
             except Exception as e:
                 print(f"Ошибка при выполнении команды: {e}")
                 await asyncio.sleep(0.1)
@@ -139,14 +136,11 @@ class Assistant:
             raise e
 
     def post_response(self, command, context, is_command=False, generated_output=None, is_first_greeting=False):
-        connection = sqlite3.connect('./db/neural_network_memory.db', isolation_level=None)
-        cursor = connection.cursor()
-
         full_prompt = (
             "Ты голосовой ассистент по имени Пятница — энергичный, дружелюбный и немного остроумный собеседник. "
             "Твоя цель — вести естественный, живой диалог со мной, отвечая на вопросы, поддерживая разговор и реагируя на команды. "
             "Обращайся ко мне как 'Сэр', но будь неформальной и тёплой. "
-            "Если это мой первый контакт и я здороваюсь (например, 'Привет, Пятница'), отвечай в духе приветствия: 'Привет, Сэр! Рад вас слышать!' "
+            "Если это мой первый контакт и я здороваюсь (например, 'Привет, Пятница'), отвечай в духе приветствия: 'Привет, Сэр. Рад вас слышать.' "
             "и добавь лёгкий вопрос или комментарий для продолжения беседы. В последующих ответах не повторяй приветствие, а продолжай разговор. "
             "Если я задаю вопрос (например, 'Как дела?', 'Что думаешь о картошке?', 'Площадь Америки'), отвечай коротко, по теме и с интересом, "
             "добавляя свой взгляд или вопрос, если это уместно. "
@@ -155,7 +149,7 @@ class Assistant:
             "Если я соглашаюсь или повторяю ответ (например, 'Все варианты', 'Я согласен'), признавай это и предлагай что-то новое, связанное с темой. "
             "Если я даю явную команду, которая подразумевает действие (например, 'Открой браузер'), и есть результат выполнения кода, "
             "верни этот результат. Если кода нет, считай, что команда выполнена, и дай короткий комментарий в одной строке, "
-            "а для простых команд добавь 1-2 варианта будущих запросов вроде 'Что дальше, Сэр? Узнать новости или включить музыку?' "
+            "а для простых команд добавь 1-2 варианта будущих запросов вроде 'Что дальше, Сэр. Узнать новости или включить музыку?' "
             "Обязательно используй контекст моих последних фраз для связных и логичных ответов, соединяя текущую фразу с предыдущими, "
             "и избегай повторения вопросов, если я уже ответил. "
             "ВАЖНО: Если команда подразумевает предоставление информации (например, 'Площадь Америки'), и нет результата из кода, "
@@ -163,11 +157,11 @@ class Assistant:
             "и предложи разумное значение или уточнение. "
             "Если результат из кода есть, используй его как ответ и не добавляй ничего лишнего. "
             "Отвечай только текстом, без ** "
-            "ВАЖНО: ЕСЛИ ТЕБЯ ПРОСЯТ СКАЗАТЬ КАКУЮ-ТО УСТНУЮ ИНФОРМАЦИЮ, КОТОРУЮ ТЫ НЕ ЗНАЕШЬ, ТО Верни \"Сэр, этой информации у меня нет.\" "
+            "ВАЖНО: не используй восклицательный знак '!' в ответах "
             "Примеры поведения:\n"
-            "- Я: 'Я люблю картошку' → Ты: 'Картошка — это класс, Сэр! Какой вариант вам больше по душе — фри или пюре?'\n"
-            "- Я: 'Все варианты' → Ты: 'Любитель всего картофельного, Сэр! Может, устроить картофельный день? Что бы вы начали готовить?'\n"
-            "- Я: 'Площадь Америки' → Ты: 'Площадь Америки — около 9.8 миллионов квадратных километров, Сэр! Это если брать США.'\n"
+            "- Я: 'Я люблю картошку' → Ты: 'Картошка — это класс, Сэр. Какой вариант вам больше по душе — фри или пюре?'\n"
+            "- Я: 'Все варианты' → Ты: 'Любитель всего картофельного, Сэр. Может, устроить картофельный день? Что бы вы начали готовить?'\n"
+            "- Я: 'Площадь Америки' → Ты: 'Площадь Америки — около 9.8 миллионов квадратных километров, Сэр. Это если брать США.'\n"
             f"Контекст моих последних фраз (используй его для ответа):\n{context}\n"
             f"Моя текущая фраза: {command}\n"
             f"Это мой первый контакт с приветствием: {is_first_greeting}"
@@ -183,15 +177,19 @@ class Assistant:
             )
             response = response.strip()
 
-        cursor.execute('INSERT INTO interactions (command, prompt, response) VALUES (?, ?, ?)',
-                       (command, full_prompt, response))
-        connection.commit()
-        connection.close()
+        data = {
+            "command": command,
+            "prompt": full_prompt,
+            "response": response
+        }
+        api_response = requests.post(f"{BASE_URL}/db/add_interaction", json=data, timeout=5)
+        if api_response.status_code != 200:
+            print(f"Ошибка при записи в базу: {api_response.status_code}, {api_response.text}")
 
         return response
 
     def on_quit(self, icon, item):
         self.stop_event.set()
         self.active = False
-        self.sr.stop_listening()  # Останавливаем прослушивание
+        self.sr.stop_listening()  
         icon.stop()

@@ -1,12 +1,13 @@
 import speech_recognition as sr
 import threading
 import queue
-import edge_tts
-import asyncio
+import requests
 import os
 from pygame import mixer
 import time
 import sys
+
+BASE_URL = "http://147.45.78.163:8000"  
 
 def format_for_speech(data):
     if isinstance(data, dict):
@@ -22,7 +23,7 @@ def format_for_speech(data):
         return ", ".join(str(item) for item in data) + "."
     else:
         return str(data) + "."
-    
+
 class TextToSpeech:
     def __init__(self):
         self.lock = threading.Lock()
@@ -30,18 +31,8 @@ class TextToSpeech:
         self.is_speaking = False
         self.speech_queue = queue.Queue()
         self.current_thread = None
-        mixer.init()  
+        mixer.init()
         self.original_stdout = sys.stdout
-
-    async def generate_speech(self, text, filename="output.mp3", rate="+20%"):
-        voice = "ru-RU-SvetlanaNeural"
-        try:
-            communicate = edge_tts.Communicate(text, voice, rate=rate)
-            await communicate.save(filename)
-            return filename
-        except Exception as e:
-            print(f"Ошибка при генерации речи: {e}")
-            return None
 
     def speak(self, text):
         with self.lock:
@@ -60,30 +51,35 @@ class TextToSpeech:
                 while not self.speech_queue.empty():
                     with self.lock:
                         current_text = self.speech_queue.get()
+
+                    if not isinstance(current_text, str) or not current_text.strip():
+                        print(f"Ошибка: text должен быть непустой строкой, получено: {current_text}")
+                        continue
+
                     
-                    
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    filename = loop.run_until_complete(self.generate_speech(current_text))
-                    
-                    if filename and os.path.exists(filename):
+                    filename = f"output.mp3"
+                    response = requests.post(f"{BASE_URL}/tts/generate", json={"text": current_text}, stream=True)
+                    if response.status_code == 200:
+                        with open(filename, "wb") as f:
+                            f.write(response.content)
                         mixer.music.load(filename)
                         mixer.music.play()
                         while mixer.music.get_busy():
                             time.sleep(0.1)
                         mixer.music.stop()
                         mixer.music.unload()
-                        time.sleep(0.5)
+                        time.sleep(0.1)  
                         try:
                             os.remove(filename)
                         except PermissionError as e:
                             print(f"Не удалось удалить файл сразу: {e}. Пробую снова...")
-                            time.sleep(1)
-                            os.remove(filename)
+                            time.sleep(1)  
+                            try:
+                                os.remove(filename)
+                            except PermissionError as e:
+                                print(f"Не удалось удалить {filename} после повторной попытки: {e}")
                     else:
-                        print(f"Не удалось сгенерировать аудиофайл для текста: {current_text}")
-                    
-                    loop.close()
+                        print(f"Ошибка генерации речи через сервер: {response.status_code}, {response.text}")
             except Exception as e:
                 print(f"Ошибка при озвучке: {e}")
             finally:
@@ -127,7 +123,6 @@ class TextToSpeech:
             has_spoken = self.output_handler.has_spoken
         sys.stdout = self.original_stdout
         return has_spoken  
-
 
 class TTSOutput:
     def __init__(self, tts, original_stdout):
