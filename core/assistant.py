@@ -23,6 +23,7 @@ class Assistant:
         self.work = Work(self.tts)
         self.dialogue_timeout = 30
         self.last_command_time = None
+        self.is_working = None
         
         print("База данных управляется сервером.")
         self.sr.start_listening()
@@ -154,6 +155,7 @@ class Assistant:
         while self.voice_input_active.is_set() and not self.stop_event.is_set():
             try:
                 command = self.sr.get_command()
+                self.is_working = "YES"
                 if command is None:
                     await asyncio.sleep(0.1)
                     continue
@@ -162,9 +164,12 @@ class Assistant:
                         print("Время диалога истекло, перезапуск диалога...")
                         self.last_command_time = None
 
-                    if (self.last_command_time is None and "пятница" in command.lower()) or \
-                       (self.last_command_time is not None and (time.time() - self.last_command_time) < self.dialogue_timeout):
+                    if  (self.last_command_time is None and "пятница" in command.lower()) or \
+                        (self.last_command_time is not None and (time.time() - self.last_command_time) < self.dialogue_timeout) or \
+                        (self.is_working is None):
                         await self.process_command(command)
+                        self.is_working = "YES"
+                        
                     else:
                         print(f"Пропущено: {command} (нет ключевого слова или время диалога истекло)")
                 await asyncio.sleep(0.1)
