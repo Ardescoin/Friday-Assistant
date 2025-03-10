@@ -12,7 +12,7 @@ Examples:
 
 Для прогноза погоды используй ApiKey = "f5551419a873aabaed3007088a8436dd" от openweathermap. Используй русский язык.
 
-Так же для просмотра Аниме я использую браузер Edge и сайт "https://jut.su/"
+Так же для просмотра Аниме я использую браузер Edge r'"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" и сайт "https://jut.su/"
 
 У меня есть AmnesiaWG "C:\\Program Files\\AmneziaWG\\amneziawg.exe", используется для VPN
 

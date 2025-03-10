@@ -6,7 +6,7 @@ from modules.gpt import get_gpt_response
 from modules.protocols import Weekend
 import asyncio
 
-BASE_URL = "http://147.45.78.163:8000"  
+BASE_URL = "http://147.45.78.163:8000"
 
 class Assistant:
     def __init__(self, speech_recognition, text_to_speech):
@@ -23,89 +23,145 @@ class Assistant:
         
         print("База данных управляется сервером.")
         self.sr.start_listening()
+        self.register_pc_status(True)  
+        self.loop = asyncio.new_event_loop()
+        self.command_check_thread = threading.Thread(target=self.run_event_loop, daemon=True)
+        self.command_check_thread.start()
+
+    def run_event_loop(self):
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self.check_commands_from_bot())
+
+    def register_pc_status(self, active):
+        for attempt in range(5):
+            try:
+                response = requests.post(f"{BASE_URL}/pc/status", json={"active": active}, timeout=5)
+                print(f"Статус ПК зарегистрирован: {active}, ответ сервера: {response.text}")
+                break
+            except requests.exceptions.RequestException as e:
+                print(f"Ошибка регистрации статуса ПК (попытка {attempt + 1}/5): {str(e)}")
+                if attempt < 4:
+                    time.sleep(2)
+        else:
+            print("Не удалось зарегистрировать статус ПК после 5 попыток")
+
+    async def check_commands_from_bot(self):
+        print("Прослушивание команд от бота запущено")
+        while not self.stop_event.is_set():
+            retries = 5
+            for attempt in range(retries):
+                try:
+                    response = requests.post(f"{BASE_URL}/pc/command", json={"command": "check"}, timeout=10)
+                    if response.status_code == 200:
+                        command_data = response.json()
+                        command_id = command_data.get("command_id")
+                        command = command_data.get("command")
+                        if command and command != "check":
+                            print(f"Получена команда: {command} (command_id: {command_id})")
+                            bot_response = await self.process_command(command)
+                            if bot_response:
+                                for retry in range(5):
+                                    try:
+                                        requests.post(f"{BASE_URL}/pc/response", json={"command_id": command_id, "response": bot_response}, timeout=10)
+                                        print(f"Ответ отправлен: {bot_response}")
+                                        break
+                                    except requests.exceptions.RequestException:
+                                        if retry < 4:
+                                            await asyncio.sleep(1)
+                            else:
+                                for retry in range(5):
+                                    try:
+                                        requests.post(f"{BASE_URL}/pc/response", json={"command_id": command_id, "response": "Ошибка обработки команды, Сэр"}, timeout=10)
+                                        print("Отправлена ошибка обработки команды")
+                                        break
+                                    except requests.exceptions.RequestException:
+                                        if retry < 4:
+                                            await asyncio.sleep(1)
+                        break
+                    else:
+                        break
+                except requests.exceptions.RequestException:
+                    if attempt < retries - 1:
+                        await asyncio.sleep(1)
+            await asyncio.sleep(1)
 
     def start_listening_task(self):
-        asyncio.run(self.listen_for_command_async())  
-    
+        asyncio.run(self.listen_for_command_async())
+
     def start_listener(self):
         print("ВКЛ")
         self.voice_input_active.set()
         self.active = True
         self.listening_thread = threading.Thread(target=self.start_listening_task, daemon=False)
         self.listening_thread.start()
-        
+
+    async def process_command(self, command):
+        if not command or not command.strip():
+            return None
+
+        if self.last_command_time is not None and (time.time() - self.last_command_time) >= self.dialogue_timeout:
+            self.last_command_time = None
+
+        response = requests.get(f"{BASE_URL}/db/get_interactions", params={"limit": 5}, timeout=5)
+        if response.status_code == 200:
+            recent_interactions = response.json()["interactions"]
+            recent_commands = [interaction[1] for interaction in recent_interactions]
+            unique_commands = []
+            seen = set()
+            for cmd in reversed(recent_commands):
+                if cmd not in seen:
+                    unique_commands.append(cmd)
+                    seen.add(cmd)
+            unique_commands = unique_commands[-3:]
+            context = "Контекст моих последних фраз:\n" + \
+                      "\n".join(f"[{i+1}] {cmd}" for i, cmd in enumerate(unique_commands)) + "\n"
+        else:
+            context = "Контекст недоступен из-за ошибки сервера.\n"
+            print(f"Ошибка при получении контекста: {response.status_code}, {response.text}")
+
+        is_first_greeting = "привет" in command.lower() and self.last_command_time is None
+
+        if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
+            await self.weekend.run_exit_protocol()
+            response = self.post_response(command, context, is_first_greeting=is_first_greeting)
+        else:
+            generated_code = get_gpt_response(command)
+            if generated_code and generated_code.strip():
+                try:
+                    output = self.execute_generated_code(generated_code)
+                    if output and output != "Команда выполнена, Сэр":
+                        response = self.post_response(command, context, generated_output=output, is_first_greeting=is_first_greeting)
+                    else:
+                        response = self.post_response(command, context, generated_output="Команда выполнена, Сэр", is_first_greeting=is_first_greeting)
+                except Exception as e:
+                    print(f"Ошибка при выполнении кода: {e}")
+                    response = self.post_response(command, context, generated_output=f"Ошибка: {str(e)}", is_first_greeting=is_first_greeting)
+            else:
+                response = self.post_response(command, context, is_first_greeting=is_first_greeting)
+
+        print(f"Ответ для бота: {response}")
+        self.tts.speak(response)
+        self.last_command_time = time.time()
+        return response
+
     async def listen_for_command_async(self):
         while self.voice_input_active.is_set() and not self.stop_event.is_set():
             try:
-                command = self.sr.get_command()  
-                if command is None:  
+                command = self.sr.get_command()
+                if command is None:
                     await asyncio.sleep(0.1)
                     continue
                 if command and command.strip():
-                    
                     if self.last_command_time is not None and (time.time() - self.last_command_time) >= self.dialogue_timeout:
                         print("Время диалога истекло, перезапуск диалога...")
-                        self.last_command_time = None  
+                        self.last_command_time = None
 
                     if (self.last_command_time is None and "пятница" in command.lower()) or \
-                    (self.last_command_time is not None and (time.time() - self.last_command_time) < self.dialogue_timeout):
-                        
-                        
-                        response = requests.get(f"{BASE_URL}/db/get_interactions", params={"limit": 5}, timeout=5)  
-                        if response.status_code == 200:
-                            recent_interactions = response.json()["interactions"]
-                            recent_commands = [interaction[1] for interaction in recent_interactions]  
-                            
-                            unique_commands = []
-                            seen = set()
-                            for cmd in reversed(recent_commands):
-                                if cmd not in seen:
-                                    unique_commands.append(cmd)
-                                    seen.add(cmd)
-                            
-                            unique_commands = unique_commands[-3:]
-                            context = "Контекст моих последних фраз:\n" + \
-                                      "\n".join(f"[{i+1}] {cmd}" for i, cmd in enumerate(unique_commands)) + "\n"
-                        else:
-                            context = "Контекст недоступен из-за ошибки сервера.\n"
-                            print(f"Ошибка при получении контекста: {response.status_code}, {response.text}")
-                        print(f"Контекст: {context}")
-                        
-                        is_first_greeting = "привет" in command.lower() and self.last_command_time is None
-
-                        if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
-                            await self.weekend.run_exit_protocol()
-                            response = self.post_response(command, context, is_first_greeting=is_first_greeting)
-                            print(f"Ответ: {response}")
-                            self.tts.speak(response)
-                        else:
-                            generated_code = get_gpt_response(command)  
-                            if generated_code and generated_code.strip():
-                                try:
-                                    output = self.execute_generated_code(generated_code)
-                                    print(f"Сгенерированный код: {generated_code}")
-                                    if output is not None and output != "Команда выполнена, Сэр":
-                                        response = self.post_response(command, context, generated_output=output, is_first_greeting=is_first_greeting)
-                                    else:
-                                        response = self.post_response(command, context, generated_output="Команда выполнена, Сэр", is_first_greeting=is_first_greeting)
-                                    print(f"Ответ: {response}")
-                                    has_spoken = self.tts.restore_output()  
-                                    if not has_spoken:
-                                        self.tts.speak(response)
-                                except Exception as e:
-                                    print(f"Ошибка при выполнении кода: {e}")
-                                    response = self.post_response(command, context, generated_output=f"Ошибка: {str(e)}", is_first_greeting=is_first_greeting)
-                                    print(f"Ответ: {response}")
-                                    self.tts.speak(response)
-                            else:
-                                response = self.post_response(command, context, is_first_greeting=is_first_greeting)
-                                print(f"Ответ: {response}")
-                                self.tts.speak(response)
-                        
-                        self.last_command_time = time.time()
+                       (self.last_command_time is not None and (time.time() - self.last_command_time) < self.dialogue_timeout):
+                        await self.process_command(command)
                     else:
                         print(f"Пропущено: {command} (нет ключевого слова или время диалога истекло)")
-                await asyncio.sleep(0.1)  
+                await asyncio.sleep(0.1)
             except requests.exceptions.RequestException as e:
                 print(f"Ошибка соединения с сервером: {e}")
                 await asyncio.sleep(0.1)
@@ -124,12 +180,9 @@ class Assistant:
                 return None
             
             self.tts.redirect_output()
-            
             exec_globals = {}
             exec(code, exec_globals)
-            
             self.tts.restore_output()
-
             return "Команда выполнена, Сэр"
         except Exception as e:
             self.tts.restore_output()
@@ -191,5 +244,23 @@ class Assistant:
     def on_quit(self, icon, item):
         self.stop_event.set()
         self.active = False
-        self.sr.stop_listening()  
+        self.sr.stop_listening()
+        self.register_pc_status(False)  
+        if self.loop.is_running():
+            self.loop.stop()
+        if self.command_check_thread.is_alive():
+            self.command_check_thread.join(timeout=2)
         icon.stop()
+
+if __name__ == "__main__":
+    from core.speech_recognition import SpeechRecognition
+    from core.text_to_speech import TextToSpeech
+    sr = SpeechRecognition()
+    tts = TextToSpeech()
+    assistant = Assistant(sr, tts)
+    assistant.start_listener()
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        assistant.on_quit(None, None)

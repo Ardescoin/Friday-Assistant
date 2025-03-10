@@ -72,7 +72,6 @@ class TextToSpeech:
                         try:
                             os.remove(filename)
                         except PermissionError as e:
-                            print(f"Не удалось удалить файл сразу: {e}. Пробую снова...")
                             time.sleep(1)  
                             try:
                                 os.remove(filename)
