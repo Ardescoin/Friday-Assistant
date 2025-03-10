@@ -3,9 +3,12 @@ import time
 import g4f
 import requests
 from modules.gpt import get_gpt_response
+from modules.additional import add
 from modules.protocols import Weekend
+from modules.protocols import Work
 import asyncio
-
+import sys
+import io
 BASE_URL = "http://147.45.78.163:8000"
 
 class Assistant:
@@ -17,7 +20,7 @@ class Assistant:
         self.active = False
         self.listening_thread = None
         self.weekend = Weekend(self.tts)
-        
+        self.work = Work(self.tts)
         self.dialogue_timeout = 30
         self.last_command_time = None
         
@@ -124,15 +127,18 @@ class Assistant:
         if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
             await self.weekend.run_exit_protocol()
             response = self.post_response(command, context, is_first_greeting=is_first_greeting)
+        if "протокол рабочий" in command.lower() or "рабочий протокол" in command.lower():
+            await self.work.run_exit_protocol()
+            response = self.post_response(command, context, is_first_greeting=is_first_greeting)
         else:
             generated_code = get_gpt_response(command)
             if generated_code and generated_code.strip():
                 try:
                     output = self.execute_generated_code(generated_code)
-                    if output and output != "Команда выполнена, Сэр":
-                        response = self.post_response(command, context, generated_output=output, is_first_greeting=is_first_greeting)
+                    if output:  
+                        response = output
                     else:
-                        response = self.post_response(command, context, generated_output="Команда выполнена, Сэр", is_first_greeting=is_first_greeting)
+                        response = self.post_response(command, context, is_first_greeting=is_first_greeting)
                 except Exception as e:
                     print(f"Ошибка при выполнении кода: {e}")
                     response = self.post_response(command, context, generated_output=f"Ошибка: {str(e)}", is_first_greeting=is_first_greeting)
@@ -168,7 +174,7 @@ class Assistant:
             except Exception as e:
                 print(f"Ошибка при выполнении команды: {e}")
                 await asyncio.sleep(0.1)
-
+    
     def execute_generated_code(self, code):
         try:
             if not code or not any(kw in code for kw in ("def ", "import ", "class ", "=")):
@@ -179,13 +185,23 @@ class Assistant:
                 print("Ошибка: Сгенерированный код содержит синтаксические ошибки.")
                 return None
             
-            self.tts.redirect_output()
-            exec_globals = {}
+            old_stdout = sys.stdout
+            redirected_output = io.StringIO()
+            sys.stdout = redirected_output
+            
+            exec_globals = {'print': print}  
             exec(code, exec_globals)
-            self.tts.restore_output()
-            return "Команда выполнена, Сэр"
+            
+            
+            sys.stdout = old_stdout
+            output = redirected_output.getvalue().strip()
+            redirected_output.close()
+            
+            print(f"Захваченный вывод: {repr(output)}")
+            return output if output else None
         except Exception as e:
-            self.tts.restore_output()
+            sys.stdout = old_stdout
+            print(f"Ошибка в execute_generated_code: {e}")
             raise e
 
     def post_response(self, command, context, is_command=False, generated_output=None, is_first_greeting=False):
@@ -209,7 +225,7 @@ class Assistant:
             "дай краткий ответ с известной тебе информацией или скажи 'Сэр, точных данных у меня нет, но могу предположить...' "
             "и предложи разумное значение или уточнение. "
             "Если результат из кода есть, используй его как ответ и не добавляй ничего лишнего. "
-            "Отвечай только текстом, без ** "
+            "ВАЖНО: Отвечай без дополнительного форматирования текста"
             "ВАЖНО: не используй восклицательный знак '!' в ответах "
             "Примеры поведения:\n"
             "- Я: 'Я люблю картошку' → Ты: 'Картошка — это класс, Сэр. Какой вариант вам больше по душе — фри или пюре?'\n"
@@ -218,6 +234,8 @@ class Assistant:
             f"Контекст моих последних фраз (используй его для ответа):\n{context}\n"
             f"Моя текущая фраза: {command}\n"
             f"Это мой первый контакт с приветствием: {is_first_greeting}"
+            f"Здесь дополнительная информация для пользования {add}"
+            "Используй московское время"
         )
 
         if generated_output and generated_output != "Команда выполнена, Сэр":

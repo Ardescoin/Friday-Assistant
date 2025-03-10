@@ -22,7 +22,7 @@ if not is_admin():
     sys.exit()
 
 
-SAFE_PROCESSES = ["python.exe", "explorer.exe", "Code.exe", "Spotify.exe"]
+SAFE_PROCESSES = ["python.exe", "explorer.exe", "Spotify.exe"]
 
 class Weekend:
     def __init__(self, text_to_speech):

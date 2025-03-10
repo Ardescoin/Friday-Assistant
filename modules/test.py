@@ -1,11 +1,15 @@
-import requests
+import time
+from plyer import notification
 
-BASE_URL = "http://147.45.78.163:8000"
+def reminder(message, delay_minutes):
+    """Отправляет уведомление через заданное количество минут."""
+    time.sleep(10)  # Преобразуем минуты в секунды
+    notification.notify(
+        title='Напоминание!',
+        message=message,
+        app_name='Напоминалка'
+    )
 
-# Регистрация статуса
-response = requests.post(f"{BASE_URL}/pc/status", json={"active": True}, timeout=10)
-print(f"Статус ПК: {response.status_code} {response.text}")
-
-# Проверка команды
-response = requests.post(f"{BASE_URL}/pc/command", json={"command": "check"}, timeout=10)
-print(f"Проверка команды: {response.status_code} {response.text}")
+if __name__ == '__main__':
+    reminder("Пора выйти в магазин!", 10)  # Напомнить через 10 минут
+    print("Напоминание установлено на 10 минут...")
