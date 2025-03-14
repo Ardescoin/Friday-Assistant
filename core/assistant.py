@@ -9,6 +9,7 @@ from modules.protocols import Work
 import asyncio
 import sys
 import io
+import os
 BASE_URL = "http://147.45.78.163:8000"
 
 class Assistant:
@@ -19,28 +20,47 @@ class Assistant:
         self.stop_event = threading.Event()
         self.active = False
         self.listening_thread = None
-        self.weekend = Weekend(self.tts)
-        self.work = Work(self.tts)
         self.dialogue_timeout = 30
         self.last_command_time = None
-        self.is_working = None
+        self.pc_files_dir = "D:\\Jarvis\\files"  # Путь на ПК
         
+        os.makedirs(self.pc_files_dir, exist_ok=True)
         print("База данных управляется сервером.")
         self.sr.start_listening()
-        self.register_pc_status(True)  
+        
+        # Настройка цикла событий в отдельном потоке
         self.loop = asyncio.new_event_loop()
         self.command_check_thread = threading.Thread(target=self.run_event_loop, daemon=True)
         self.command_check_thread.start()
+
+        # Регистрация статуса ПК (синхронно в основном потоке)
+        asyncio.run(self.register_pc_status(True))
+
+        # Запуск periodic_file_check после старта цикла событий
+        asyncio.run_coroutine_threadsafe(self.periodic_file_check(), self.loop)
+
 
     def run_event_loop(self):
         asyncio.set_event_loop(self.loop)
         self.loop.run_until_complete(self.check_commands_from_bot())
 
-    def register_pc_status(self, active):
+    async def check_and_update_pc_status(self):
+        active = await self.check_pc_status()
+
+        self.register_pc_status(active)
+
+
+    async def register_pc_status(self, active):
         for attempt in range(5):
             try:
                 response = requests.post(f"{BASE_URL}/pc/status", json={"active": active}, timeout=5)
-                print(f"Статус ПК зарегистрирован: {active}, ответ сервера: {response.text}")
+                if response.status_code == 200:
+                    print(f"Статус ПК зарегистрирован: {active}, ответ сервера: {response.text}")
+                    if active:
+                        await self.fetch_pending_files()
+                    break
+                else:
+                    print(f"Ошибка регистрации статуса ПК: {response.status_code}")
                 break
             except requests.exceptions.RequestException as e:
                 print(f"Ошибка регистрации статуса ПК (попытка {attempt + 1}/5): {str(e)}")
@@ -72,15 +92,6 @@ class Assistant:
                                     except requests.exceptions.RequestException:
                                         if retry < 4:
                                             await asyncio.sleep(1)
-                            else:
-                                for retry in range(5):
-                                    try:
-                                        requests.post(f"{BASE_URL}/pc/response", json={"command_id": command_id, "response": "Ошибка обработки команды, Сэр"}, timeout=10)
-                                        print("Отправлена ошибка обработки команды")
-                                        break
-                                    except requests.exceptions.RequestException:
-                                        if retry < 4:
-                                            await asyncio.sleep(1)
                         break
                     else:
                         break
@@ -98,6 +109,41 @@ class Assistant:
         self.active = True
         self.listening_thread = threading.Thread(target=self.start_listening_task, daemon=False)
         self.listening_thread.start()
+        
+    
+    async def fetch_pending_files(self):
+        """Скачивание файлов из очереди сервера"""
+        try:
+            response = requests.get(f"{BASE_URL}/pc/check_file_queue", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                files = data.get("files", [])
+                for file_data in files:
+                    filename = file_data["filename"]
+                    dest_path = os.path.join(self.pc_files_dir, filename)
+                    # Скачиваем файл с сервера
+                    file_response = requests.get(f"{BASE_URL}/pc/get_file/{filename}", timeout=10)
+                    if file_response.status_code == 200:
+                        with open(dest_path, "wb") as f:
+                            f.write(file_response.content)
+                        print(f"Файл {filename} скачан в {dest_path}")
+                        # Удаляем файл с сервера после успешного скачивания
+                        remove_response = requests.delete(f"{BASE_URL}/pc/remove_file/{filename}", timeout=5)
+                        if remove_response.status_code == 200:
+                            print(f"Файл {filename} удалён с сервера")
+                        else:
+                            print(f"Ошибка удаления файла с сервера: {remove_response.status_code}")
+                    else:
+                        print(f"Ошибка скачивания файла {filename}: {file_response.status_code}")
+            else:
+                print(f"Ошибка проверки очереди файлов: {response.status_code}")
+        except requests.exceptions.RequestException as e:
+            print(f"Ошибка получения файлов: {e}")
+            
+    async def periodic_file_check(self):
+        while not self.stop_event.is_set():
+            await self.fetch_pending_files()
+            await asyncio.sleep(10)
 
     async def process_command(self, command):
         if not command or not command.strip():
@@ -106,29 +152,61 @@ class Assistant:
         if self.last_command_time is not None and (time.time() - self.last_command_time) >= self.dialogue_timeout:
             self.last_command_time = None
 
-        response = requests.get(f"{BASE_URL}/db/get_interactions", params={"limit": 5}, timeout=5)
-        if response.status_code == 200:
-            recent_interactions = response.json()["interactions"]
-            recent_commands = [interaction[1] for interaction in recent_interactions]
-            unique_commands = []
-            seen = set()
-            for cmd in reversed(recent_commands):
-                if cmd not in seen:
-                    unique_commands.append(cmd)
-                    seen.add(cmd)
-            unique_commands = unique_commands[-3:]
-            context = "Контекст моих последних фраз:\n" + \
-                      "\n".join(f"[{i+1}] {cmd}" for i, cmd in enumerate(unique_commands)) + "\n"
-        else:
-            context = "Контекст недоступен из-за ошибки сервера.\n"
-            print(f"Ошибка при получении контекста: {response.status_code}, {response.text}")
+        # Получение контекста
+        context = "Контекст недоступен.\n"  # Значение по умолчанию
+        try:
+            response = requests.get(f"{BASE_URL}/db/get_interactions", params={"limit": 5}, timeout=5)
+            if response.status_code == 200:
+                context_str = response.json().get("context", "Контекст пока пуст")
+                if context_str != "Контекст пока пуст":
+                    # Парсинг строки контекста в список команд
+                    lines = context_str.split("\n")
+                    recent_commands = []
+                    for i in range(0, len(lines) - 1, 2):  # Шаг 2 для пар "Пользователь" и "Пятница"
+                        if lines[i].startswith("Пользователь: "):
+                            cmd = lines[i].replace("Пользователь: ", "").strip()
+                            recent_commands.append(cmd)
+                    # Уникальные последние 3 команды
+                    unique_commands = []
+                    seen = set()
+                    for cmd in reversed(recent_commands):
+                        if cmd and cmd not in seen:
+                            unique_commands.append(cmd)
+                            seen.add(cmd)
+                    unique_commands = unique_commands[:3]
+                    context = "Контекст моих последних фраз:\n" + \
+                            "\n".join(f"[{i+1}] {cmd}" for i, cmd in enumerate(unique_commands)) + "\n"
+                else:
+                    context = "Контекст пока пуст.\n"
+            else:
+                print(f"Ошибка при получении контекста: {response.status_code}, {response.text}")
+        except requests.exceptions.RequestException as e:
+            print(f"Ошибка соединения с сервером: {e}")
+        except ValueError as e:
+            print(f"Ошибка парсинга JSON: {e}")
 
         is_first_greeting = "привет" in command.lower() and self.last_command_time is None
 
+        if command.startswith("отправить файл "):
+            filename = command.replace("отправить файл ", "").strip()
+            file_path = os.path.join(self.pc_files_dir, filename)
+            if os.path.exists(file_path):
+                # Отправляем файл на сервер для последующей передачи в Telegram
+                with open(file_path, "rb") as f:
+                    files = {"file": (filename, f, "application/octet-stream")}
+                    response = requests.post(f"{BASE_URL}/pc/receive_file", files=files, timeout=10)
+                if response.status_code == 200:
+                    return f"Файл {filename} готов к отправке в Telegram"
+                else:
+                    return f"Ошибка загрузки файла на сервер: {response.status_code}"
+            else:
+                return f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
+            
+        # Обработка команд
         if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
             await self.weekend.run_exit_protocol()
             response = self.post_response(command, context, is_first_greeting=is_first_greeting)
-        if "протокол рабочий" in command.lower() or "рабочий протокол" in command.lower():
+        elif "протокол рабочий" in command.lower() or "рабочий протокол" in command.lower():
             await self.work.run_exit_protocol()
             response = self.post_response(command, context, is_first_greeting=is_first_greeting)
         else:
@@ -136,7 +214,7 @@ class Assistant:
             if generated_code and generated_code.strip():
                 try:
                     output = self.execute_generated_code(generated_code)
-                    if output:  
+                    if output:
                         response = output
                     else:
                         response = self.post_response(command, context, is_first_greeting=is_first_greeting)
@@ -150,7 +228,6 @@ class Assistant:
         self.tts.speak(response)
         self.last_command_time = time.time()
         return response
-
     async def listen_for_command_async(self):
         while self.voice_input_active.is_set() and not self.stop_event.is_set():
             try:
@@ -210,6 +287,9 @@ class Assistant:
             raise e
 
     def post_response(self, command, context, is_command=False, generated_output=None, is_first_greeting=False):
+        import datetime
+        date = datetime.datetime.now().strftime("%H:%M:%S")
+        day = datetime.datetime.now().strftime("%A")
         full_prompt = (
             "Ты голосовой ассистент по имени Пятница — энергичный, дружелюбный и немного остроумный собеседник. "
             "Твоя цель — вести естественный, живой диалог со мной, отвечая на вопросы, поддерживая разговор и реагируя на команды. "
@@ -240,7 +320,7 @@ class Assistant:
             f"Моя текущая фраза: {command}\n"
             f"Это мой первый контакт с приветствием: {is_first_greeting}"
             f"Здесь дополнительная информация для пользования {add}"
-            "Используй московское время"
+            f"Текущее время: {date}. День недели {day}"
         )
 
         if generated_output and generated_output != "Команда выполнена, Сэр":
@@ -263,27 +343,22 @@ class Assistant:
             print(f"Ошибка при записи в базу: {api_response.status_code}, {api_response.text}")
 
         return response
+    
 
-    def on_quit(self, icon, item):
-        self.stop_event.set()
+    def on_quit(self, icon):
+        asyncio.run(self.register_pc_status(False)) 
+        self.stop_event.set() 
         self.active = False
         self.sr.stop_listening()
-        self.register_pc_status(False)  
+        
         if self.loop.is_running():
             self.loop.stop()
+
+        
         if self.command_check_thread.is_alive():
             self.command_check_thread.join(timeout=2)
+
+        
         icon.stop()
 
-if __name__ == "__main__":
-    from core.speech_recognition import SpeechRecognition
-    from core.text_to_speech import TextToSpeech
-    sr = SpeechRecognition()
-    tts = TextToSpeech()
-    assistant = Assistant(sr, tts)
-    assistant.start_listener()
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        assistant.on_quit(None, None)
+

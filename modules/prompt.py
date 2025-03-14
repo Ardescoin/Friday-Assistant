@@ -18,6 +18,7 @@ Examples:
 Но мой основной браузер это Яндекс Браузер r'"C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe"
 
 У меня есть AmnesiaWG "C:\\Program Files\\AmneziaWG\\amneziawg.exe", используется для VPN
+У меня есть телеграм "C:\\Users\\diluc\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe"
 
 Когда я прошу состояние компьютера, ты должен показать заряд аккумулятора, нагрузка памяти, заполненность оперативной памяти
 Для создания напоминаний обязательно используй обе библиотеки `time` и `Plyer` а в print() всегда пиши только "Напоминание создано"

@@ -1,6 +1,7 @@
 import requests
 import g4f
 from modules.prompt import main_prompt
+import time
 
 BASE_URL = "http://147.45.78.163:8000"
 
@@ -12,7 +13,18 @@ def get_gpt_response(command):
             print(f"Ошибка при получении предыдущих взаимодействий: {response.status_code}")
             previous_interactions = []
         else:
-            previous_interactions = response.json()["interactions"]
+            context_str = response.json().get("context", "Контекст пока пуст")
+            if context_str == "Контекст пока пуст":
+                previous_interactions = []
+            else:
+                
+                lines = context_str.split("\n")
+                previous_interactions = []
+                for i in range(0, len(lines) - 1, 2):  
+                    if lines[i].startswith("Пользователь: ") and lines[i + 1].startswith("Пятница: "):
+                        cmd = lines[i].replace("Пользователь: ", "").strip()
+                        resp = lines[i + 1].replace("Пятница: ", "").strip()
+                        previous_interactions.append([time.time(), cmd, resp])  
 
         
         prompt = main_prompt + "\n\n"
@@ -21,7 +33,7 @@ def get_gpt_response(command):
             for i, interaction in enumerate(previous_interactions):
                 prompt += f"--- Взаимодействие {i+1} ---\n"
                 prompt += f"Команда: {interaction[1]}\n"
-                prompt += f"Ответ: {interaction[2]}\n"  
+                prompt += f"Ответ: {interaction[2]}\n"
         else:
             prompt += "История взаимодействий отсутствует.\n"
 
@@ -38,10 +50,10 @@ def get_gpt_response(command):
         if isinstance(gpt_response, str) and gpt_response.strip():
             response = gpt_response
         elif isinstance(gpt_response, list) and gpt_response:
-            response = gpt_response[0].strip()  
+            response = gpt_response[0].strip()
         else:
             print("Сгенерированный код пуст или имеет неверный формат.")
-            return ""  
+            return ""
 
         
         save_code_to_file(response)

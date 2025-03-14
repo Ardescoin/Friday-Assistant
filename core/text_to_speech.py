@@ -56,9 +56,8 @@ class TextToSpeech:
                         print(f"Ошибка: text должен быть непустой строкой, получено: {current_text}")
                         continue
 
-                    
                     filename = f"output.mp3"
-                    response = requests.post(f"{BASE_URL}/tts/generate", json={"text": current_text}, stream=True)
+                    response = requests.post(f"{BASE_URL}/tts", json={"text": current_text}, stream=True)
                     if response.status_code == 200:
                         with open(filename, "wb") as f:
                             f.write(response.content)
@@ -68,11 +67,11 @@ class TextToSpeech:
                             time.sleep(0.1)
                         mixer.music.stop()
                         mixer.music.unload()
-                        time.sleep(0.1)  
+                        time.sleep(0.1)
                         try:
                             os.remove(filename)
                         except PermissionError as e:
-                            time.sleep(1)  
+                            time.sleep(1)
                             try:
                                 os.remove(filename)
                             except PermissionError as e:
