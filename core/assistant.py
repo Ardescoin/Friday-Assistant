@@ -22,21 +22,21 @@ class Assistant:
         self.listening_thread = None
         self.dialogue_timeout = 30
         self.last_command_time = None
-        self.pc_files_dir = "D:\\Jarvis\\files"  # Путь на ПК
+        self.pc_files_dir = "D:\\Jarvis\\files"  
         
         os.makedirs(self.pc_files_dir, exist_ok=True)
         print("База данных управляется сервером.")
         self.sr.start_listening()
         
-        # Настройка цикла событий в отдельном потоке
+        
         self.loop = asyncio.new_event_loop()
         self.command_check_thread = threading.Thread(target=self.run_event_loop, daemon=True)
         self.command_check_thread.start()
 
-        # Регистрация статуса ПК (синхронно в основном потоке)
+        
         asyncio.run(self.register_pc_status(True))
 
-        # Запуск periodic_file_check после старта цикла событий
+        
         asyncio.run_coroutine_threadsafe(self.periodic_file_check(), self.loop)
 
 
@@ -121,13 +121,13 @@ class Assistant:
                 for file_data in files:
                     filename = file_data["filename"]
                     dest_path = os.path.join(self.pc_files_dir, filename)
-                    # Скачиваем файл с сервера
+                    
                     file_response = requests.get(f"{BASE_URL}/pc/get_file/{filename}", timeout=10)
                     if file_response.status_code == 200:
                         with open(dest_path, "wb") as f:
                             f.write(file_response.content)
                         print(f"Файл {filename} скачан в {dest_path}")
-                        # Удаляем файл с сервера после успешного скачивания
+                        
                         remove_response = requests.delete(f"{BASE_URL}/pc/remove_file/{filename}", timeout=5)
                         if remove_response.status_code == 200:
                             print(f"Файл {filename} удалён с сервера")
@@ -152,21 +152,21 @@ class Assistant:
         if self.last_command_time is not None and (time.time() - self.last_command_time) >= self.dialogue_timeout:
             self.last_command_time = None
 
-        # Получение контекста
-        context = "Контекст недоступен.\n"  # Значение по умолчанию
+        
+        context = "Контекст недоступен.\n"  
         try:
             response = requests.get(f"{BASE_URL}/db/get_interactions", params={"limit": 5}, timeout=5)
             if response.status_code == 200:
                 context_str = response.json().get("context", "Контекст пока пуст")
                 if context_str != "Контекст пока пуст":
-                    # Парсинг строки контекста в список команд
+                    
                     lines = context_str.split("\n")
                     recent_commands = []
-                    for i in range(0, len(lines) - 1, 2):  # Шаг 2 для пар "Пользователь" и "Пятница"
+                    for i in range(0, len(lines) - 1, 2):  
                         if lines[i].startswith("Пользователь: "):
                             cmd = lines[i].replace("Пользователь: ", "").strip()
                             recent_commands.append(cmd)
-                    # Уникальные последние 3 команды
+                    
                     unique_commands = []
                     seen = set()
                     for cmd in reversed(recent_commands):
@@ -191,7 +191,7 @@ class Assistant:
             filename = command.replace("отправить файл ", "").strip()
             file_path = os.path.join(self.pc_files_dir, filename)
             if os.path.exists(file_path):
-                # Отправляем файл на сервер для последующей передачи в Telegram
+                
                 with open(file_path, "rb") as f:
                     files = {"file": (filename, f, "application/octet-stream")}
                     response = requests.post(f"{BASE_URL}/pc/receive_file", files=files, timeout=10)
@@ -202,7 +202,7 @@ class Assistant:
             else:
                 return f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
             
-        # Обработка команд
+        
         if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
             await self.weekend.run_exit_protocol()
             response = self.post_response(command, context, is_first_greeting=is_first_greeting)
@@ -232,7 +232,6 @@ class Assistant:
         while self.voice_input_active.is_set() and not self.stop_event.is_set():
             try:
                 command = self.sr.get_command()
-                self.is_working = "YES"
                 if command is None:
                     await asyncio.sleep(0.1)
                     continue
@@ -242,10 +241,8 @@ class Assistant:
                         self.last_command_time = None
 
                     if  (self.last_command_time is None and "пятница" in command.lower()) or \
-                        (self.last_command_time is not None and (time.time() - self.last_command_time) < self.dialogue_timeout) or \
-                        (self.is_working is None):
+                        (self.last_command_time is not None and (time.time() - self.last_command_time) < self.dialogue_timeout):
                         await self.process_command(command)
-                        self.is_working = "YES"
                         
                     else:
                         print(f"Пропущено: {command} (нет ключевого слова или время диалога истекло)")
@@ -300,7 +297,6 @@ class Assistant:
             "добавляя свой взгляд или вопрос, если это уместно. "
             "Если я говорю что-то не связанное с командой (например, 'Я думаю кушать сходить'), поддерживай разговор естественно, "
             "опираясь на контекст моих последних фраз, и развивай тему дальше, а не повторяй один и тот же вопрос. "
-            "Если я соглашаюсь или повторяю ответ (например, 'Все варианты', 'Я согласен'), признавай это и предлагай что-то новое, связанное с темой. "
             "Если я даю явную команду, которая подразумевает действие (например, 'Открой браузер'), и есть результат выполнения кода, "
             "верни этот результат. Если кода нет, считай, что команда выполнена, и дай короткий комментарий в одной строке, "
             "а для простых команд добавь 1-2 варианта будущих запросов вроде 'Что дальше, Сэр. Узнать новости или включить музыку?' "
@@ -309,13 +305,8 @@ class Assistant:
             "ВАЖНО: Если команда подразумевает предоставление информации (например, 'Площадь Америки'), и нет результата из кода, "
             "дай краткий ответ с известной тебе информацией или скажи 'Сэр, точных данных у меня нет, но могу предположить...' "
             "и предложи разумное значение или уточнение. "
-            "Если результат из кода есть, используй его как ответ и не добавляй ничего лишнего. "
             "ВАЖНО: Отвечай без дополнительного форматирования текста"
             "ВАЖНО: не используй восклицательный знак '!' в ответах "
-            "Примеры поведения:\n"
-            "- Я: 'Я люблю картошку' → Ты: 'Картошка — это класс, Сэр. Какой вариант вам больше по душе — фри или пюре?'\n"
-            "- Я: 'Все варианты' → Ты: 'Любитель всего картофельного, Сэр. Может, устроить картофельный день? Что бы вы начали готовить?'\n"
-            "- Я: 'Площадь Америки' → Ты: 'Площадь Америки — около 9.8 миллионов квадратных километров, Сэр. Это если брать США.'\n"
             f"Контекст моих последних фраз (используй его для ответа):\n{context}\n"
             f"Моя текущая фраза: {command}\n"
             f"Это мой первый контакт с приветствием: {is_first_greeting}"

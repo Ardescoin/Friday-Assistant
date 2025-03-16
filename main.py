@@ -10,7 +10,7 @@ from core.text_to_speech import TextToSpeech
 
 
 def main():
-    sr = SpeechRecognition(device_index=1)
+    sr = SpeechRecognition(device_index=2)
     tts = TextToSpeech()
 
     assistant = Assistant(sr, tts)
