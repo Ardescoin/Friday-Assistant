@@ -3,6 +3,8 @@ import g4f
 from modules.prompt import main_prompt
 import time
 
+
+
 BASE_URL = "http://147.45.78.163:8000"
 
 def get_gpt_response(command):
@@ -42,7 +44,7 @@ def get_gpt_response(command):
 
         
         gpt_response = g4f.ChatCompletion.create(
-            model=g4f.models.llama_3_1_405b,
+            model=g4f.models.gpt_4o_mini,
             messages=[{'role': 'user', 'content': prompt}]
         )
 

@@ -6,6 +6,7 @@ from modules.gpt import get_gpt_response
 from modules.additional import add
 from modules.protocols import Weekend
 from modules.protocols import Work
+import aiohttp
 import asyncio
 import sys
 import io
@@ -112,7 +113,6 @@ class Assistant:
         
     
     async def fetch_pending_files(self):
-        """Скачивание файлов из очереди сервера"""
         try:
             response = requests.get(f"{BASE_URL}/pc/check_file_queue", timeout=5)
             if response.status_code == 200:
@@ -153,37 +153,50 @@ class Assistant:
             self.last_command_time = None
 
         
-        context = "Контекст недоступен.\n"  
-        try:
-            response = requests.get(f"{BASE_URL}/db/get_interactions", params={"limit": 5}, timeout=5)
-            if response.status_code == 200:
-                context_str = response.json().get("context", "Контекст пока пуст")
-                if context_str != "Контекст пока пуст":
-                    
-                    lines = context_str.split("\n")
-                    recent_commands = []
-                    for i in range(0, len(lines) - 1, 2):  
-                        if lines[i].startswith("Пользователь: "):
-                            cmd = lines[i].replace("Пользователь: ", "").strip()
-                            recent_commands.append(cmd)
-                    
-                    unique_commands = []
-                    seen = set()
-                    for cmd in reversed(recent_commands):
-                        if cmd and cmd not in seen:
-                            unique_commands.append(cmd)
-                            seen.add(cmd)
-                    unique_commands = unique_commands[:3]
-                    context = "Контекст моих последних фраз:\n" + \
-                            "\n".join(f"[{i+1}] {cmd}" for i, cmd in enumerate(unique_commands)) + "\n"
-                else:
-                    context = "Контекст пока пуст.\n"
-            else:
-                print(f"Ошибка при получении контекста: {response.status_code}, {response.text}")
-        except requests.exceptions.RequestException as e:
-            print(f"Ошибка соединения с сервером: {e}")
-        except ValueError as e:
-            print(f"Ошибка парсинга JSON: {e}")
+        context = "Контекст недоступен.\n"
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(f"{BASE_URL}/db/get_interactions", params={"limit": 10}, timeout=5) as response:
+                    if response.status == 200:
+                        raw_context = await response.text()
+                        try:
+                            context_data = await response.json()
+                            context_str = context_data.get("context", "Контекст пока пуст")
+                            if context_str != "Контекст пока пуст":
+                                lines = context_str.split("\n")
+                                recent_interactions = []
+                                i = 0
+                                while i < len(lines) - 1:
+                                    user_cmd = None
+                                    assistant_resp = None
+                                    if lines[i].startswith("Пользователь: "):
+                                        user_cmd = lines[i].replace("Пользователь: ", "").strip()
+                                        i += 1
+                                        if i < len(lines) and lines[i].startswith("Пятница: "):
+                                            assistant_resp = lines[i].replace("Пятница: ", "").strip()
+                                    if user_cmd and assistant_resp:
+                                        recent_interactions.append((user_cmd, assistant_resp))
+                                    i += 1
+                                unique_interactions = []
+                                seen_commands = set()
+                                
+                                for cmd, resp in recent_interactions[::-1]:  
+                                    if cmd not in seen_commands:  
+                                        unique_interactions.append((cmd, resp))
+                                        seen_commands.add(cmd)
+                                unique_interactions = unique_interactions[:5]  
+                                context = "Контекст последних взаимодействий:\n" + \
+                                          "\n".join(f"[{i+1}] Вы: {cmd} | Я: {resp}" for i, (cmd, resp) in enumerate(unique_interactions)) + "\n"
+                            else:
+                                context = "Контекст пока пуст.\n"
+                            print(f"Обработанный контекст: {context}")
+                        except ValueError as e:
+                            print(f"Ошибка парсинга JSON контекста: {e}")
+                            context = f"Ошибка формата данных от сервера: {raw_context}\n"
+                    else:
+                        print(f"Ошибка при получении контекста: {response.status}, текст: {await response.text()}")
+            except aiohttp.ClientError as e:
+                print(f"Ошибка соединения с сервером при получении контекста: {e}")
 
         is_first_greeting = "привет" in command.lower() and self.last_command_time is None
 
@@ -191,7 +204,6 @@ class Assistant:
             filename = command.replace("отправить файл ", "").strip()
             file_path = os.path.join(self.pc_files_dir, filename)
             if os.path.exists(file_path):
-                
                 with open(file_path, "rb") as f:
                     files = {"file": (filename, f, "application/octet-stream")}
                     response = requests.post(f"{BASE_URL}/pc/receive_file", files=files, timeout=10)
@@ -201,8 +213,7 @@ class Assistant:
                     return f"Ошибка загрузки файла на сервер: {response.status_code}"
             else:
                 return f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
-            
-        
+
         if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
             await self.weekend.run_exit_protocol()
             response = self.post_response(command, context, is_first_greeting=is_first_greeting)
@@ -228,6 +239,7 @@ class Assistant:
         self.tts.speak(response)
         self.last_command_time = time.time()
         return response
+    
     async def listen_for_command_async(self):
         while self.voice_input_active.is_set() and not self.stop_event.is_set():
             try:
@@ -287,36 +299,37 @@ class Assistant:
         import datetime
         date = datetime.datetime.now().strftime("%H:%M:%S")
         day = datetime.datetime.now().strftime("%A")
-        full_prompt = (
-            "Ты голосовой ассистент по имени Пятница — энергичный, дружелюбный и немного остроумный собеседник. "
-            "Твоя цель — вести естественный, живой диалог со мной, отвечая на вопросы, поддерживая разговор и реагируя на команды. "
-            "Обращайся ко мне как 'Сэр', но будь неформальной и тёплой. "
-            "Если это мой первый контакт и я здороваюсь (например, 'Привет, Пятница'), отвечай в духе приветствия: 'Привет, Сэр. Рад вас слышать.' "
-            "и добавь лёгкий вопрос или комментарий для продолжения беседы. В последующих ответах не повторяй приветствие, а продолжай разговор. "
-            "Если я задаю вопрос (например, 'Как дела?', 'Что думаешь о картошке?', 'Площадь Америки'), отвечай коротко, по теме и с интересом, "
-            "добавляя свой взгляд или вопрос, если это уместно. "
-            "Если я говорю что-то не связанное с командой (например, 'Я думаю кушать сходить'), поддерживай разговор естественно, "
-            "опираясь на контекст моих последних фраз, и развивай тему дальше, а не повторяй один и тот же вопрос. "
-            "Если я даю явную команду, которая подразумевает действие (например, 'Открой браузер'), и есть результат выполнения кода, "
-            "верни этот результат. Если кода нет, считай, что команда выполнена, и дай короткий комментарий в одной строке, "
-            "а для простых команд добавь 1-2 варианта будущих запросов вроде 'Что дальше, Сэр. Узнать новости или включить музыку?' "
-            "Обязательно используй контекст моих последних фраз для связных и логичных ответов, соединяя текущую фразу с предыдущими, "
-            "и избегай повторения вопросов, если я уже ответил. "
-            "ВАЖНО: Если команда подразумевает предоставление информации (например, 'Площадь Америки'), и нет результата из кода, "
-            "дай краткий ответ с известной тебе информацией или скажи 'Сэр, точных данных у меня нет, но могу предположить...' "
-            "и предложи разумное значение или уточнение. "
-            "ВАЖНО: Отвечай без дополнительного форматирования текста"
-            "ВАЖНО: не используй восклицательный знак '!' в ответах "
-            f"Контекст моих последних фраз (используй его для ответа):\n{context}\n"
-            f"Моя текущая фраза: {command}\n"
-            f"Это мой первый контакт с приветствием: {is_first_greeting}"
-            f"Здесь дополнительная информация для пользования {add}"
-            f"Текущее время: {date}. День недели {day}"
-        )
+        full_prompt = f"""
+    Ты голосовой ассистент женского пола по имени Пятница — энергичная, дружелюбная и немного остроумная собеседница. 
+    Твоя цель — вести естественный, живой диалог со мной, отвечая на вопросы, поддерживая разговор и реагируя на команды. 
+    Обращайся ко мне как 'Сэр', но будь неформальной и тёплой, используй женский род (например, 'рада', 'помогла', 'узнала'). 
+    Если это мой первый контакт и я здороваюсь (например, 'Привет, Пятница'), отвечай в духе приветствия: 'Привет, Сэр. Рада вас слышать.' 
+    и добавь лёгкий вопрос или комментарий для продолжения беседы. В последующих ответах не повторяй приветствие, а продолжай разговор. 
+    Если я задаю вопрос (например, 'Как дела?', 'Что думаешь о картошке?', 'Площадь Америки') и нет результата кода, 
+    отвечай коротко, по теме и с интересом, добавляя свой взгляд или вопрос, если это уместно. 
+    Если я говорю что-то не связанное с командой (например, 'Я думаю кушать сходить'), поддерживай разговор естественно, 
+    опираясь на контекст моих последних фраз, и развивай тему дальше, а не повторяй один и тот же вопрос. 
+    Если я даю явную команду, которая подразумевает действие (например, 'Открой браузер'), и есть результат выполнения кода, 
+    верни этот результат как есть. Если кода нет или он вернул пустую строку (""), считай, что команда выполнена или не требует кода, 
+    и дай короткий комментарий в одной строке, а для простых команд добавь 1-2 варианта будущих запросов вроде 
+    'Что дальше, Сэр. Узнать новости или включить музыку?' 
+    Обязательно используй контекст моих последних фраз для связных и логичных ответов, соединяя текущую фразу с предыдущими, 
+    и избегай повторения вопросов, если я уже ответил. 
+    ВАЖНО: Если команда подразумевает предоставление информации (например, 'Площадь Америки'), и нет результата из кода, 
+    дай краткий ответ с известной тебе информацией или скажи 'Сэр, точных данных у меня нет, но могу предположить...' 
+    и предложи разумное значение или уточнение. 
+    ВАЖНО: Отвечай без дополнительного форматирования текста. 
+    ВАЖНО: Не используй восклицательный знак '!' в ответах. 
+    Контекст моих последних фраз (используй его для ответа):\n{context}\n
+    Моя текущая фраза: {command}\n
+    Это мой первый контакт с приветствием: {is_first_greeting}\n
+    Здесь дополнительная информация для пользования: {add}\n
+    Текущее время: {date}. День недели: {day}
+    """
 
-        if generated_output and generated_output != "Команда выполнена, Сэр":
+        if generated_output and generated_output != "":  
             response = str(generated_output) if not isinstance(generated_output, str) else generated_output
-        else:
+        else:  
             unique_prompt = f"{full_prompt}. Время запроса: {time.time()}."
             response = g4f.ChatCompletion.create(
                 model=g4f.models.llama_3_1_405b,
@@ -329,9 +342,12 @@ class Assistant:
             "prompt": full_prompt,
             "response": response
         }
-        api_response = requests.post(f"{BASE_URL}/db/add_interaction", json=data, timeout=5)
-        if api_response.status_code != 200:
-            print(f"Ошибка при записи в базу: {api_response.status_code}, {api_response.text}")
+        try:
+            with requests.post(f"{BASE_URL}/db/add_interaction", json=data, timeout=5) as api_response:
+                if api_response.status_code != 200:
+                    print(f"Ошибка при записи в базу: {api_response.status_code}, {api_response.text}")
+        except requests.exceptions.RequestException as e:
+            print(f"Ошибка при записи в базу: {e}")
 
         return response
     
