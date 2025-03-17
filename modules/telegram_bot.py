@@ -11,7 +11,6 @@ from additional import add
 import os
 
 BASE_URL = "http://147.45.78.163:8000"
-TOKEN = "7295154693:AAFGkc8kzvNxMqRW8Wo5SonvMvVH_lzANw0"
 
 print("Импорт модулей завершён")
 
