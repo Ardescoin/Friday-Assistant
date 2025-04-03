@@ -1,11 +1,12 @@
 import requests
 import g4f
-from modules.prompt import main_prompt
 import time
 
+with open('modules\prompt.txt', 'r', encoding='utf-8') as file:
+    main_prompt = file.read()
 
 
-BASE_URL = "http://147.45.78.163:8000"
+BASE_URL = "http://46.29.160.114:8000"
 
 def get_gpt_response(command):
     try:

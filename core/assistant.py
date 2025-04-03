@@ -11,7 +11,7 @@ import asyncio
 import sys
 import io
 import os
-BASE_URL = "http://147.45.78.163:8000"
+BASE_URL = "http://46.29.160.114:8000"
 
 class Assistant:
     def __init__(self, speech_recognition, text_to_speech):
@@ -22,6 +22,8 @@ class Assistant:
         self.active = False
         self.listening_thread = None
         self.dialogue_timeout = 30
+        self.weekend = Weekend(self.tts)
+        self.work = Work(self.tts)
         self.last_command_time = None
         self.pc_files_dir = "D:\\Jarvis\\files"  
         
@@ -145,6 +147,28 @@ class Assistant:
             await self.fetch_pending_files()
             await asyncio.sleep(10)
 
+    # В класс Assistant добавляем новую функцию
+    def send_file_to_server(self, filename):
+        file_path = os.path.join(self.pc_files_dir, filename)
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "rb") as f:
+                    files = {"file": (filename, f, "application/octet-stream")}
+                    response = requests.post(f"{BASE_URL}/pc/upload_file", files=files, timeout=10)
+                    if response.status_code == 200:
+                        print(f"Файл {filename} успешно отправлен на сервер")
+                        return f"Файл {filename} загружен на сервер"
+                    else:
+                        print(f"Ошибка отправки файла: {response.status_code}")
+                        return f"Ошибка загрузки файла на сервер: {response.status_code}"
+            except requests.exceptions.RequestException as e:
+                print(f"Ошибка соединения при отправке файла: {e}")
+                return f"Ошибка соединения: {str(e)}"
+        else:
+            print(f"Файл {filename} не найден в {self.pc_files_dir}")
+            return f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
+
+# Обновляем process_command для обработки команды upload_file
     async def process_command(self, command):
         if not command or not command.strip():
             return None
@@ -152,7 +176,6 @@ class Assistant:
         if self.last_command_time is not None and (time.time() - self.last_command_time) >= self.dialogue_timeout:
             self.last_command_time = None
 
-        
         context = "Контекст недоступен.\n"
         async with aiohttp.ClientSession() as session:
             try:
@@ -179,14 +202,13 @@ class Assistant:
                                     i += 1
                                 unique_interactions = []
                                 seen_commands = set()
-                                
-                                for cmd, resp in recent_interactions[::-1]:  
-                                    if cmd not in seen_commands:  
+                                for cmd, resp in recent_interactions[::-1]:
+                                    if cmd not in seen_commands:
                                         unique_interactions.append((cmd, resp))
                                         seen_commands.add(cmd)
-                                unique_interactions = unique_interactions[:5]  
+                                unique_interactions = unique_interactions[:5]
                                 context = "Контекст последних взаимодействий:\n" + \
-                                          "\n".join(f"[{i+1}] Вы: {cmd} | Я: {resp}" for i, (cmd, resp) in enumerate(unique_interactions)) + "\n"
+                                        "\n".join(f"[{i+1}] Вы: {cmd} | Я: {resp}" for i, (cmd, resp) in enumerate(unique_interactions)) + "\n"
                             else:
                                 context = "Контекст пока пуст.\n"
                             print(f"Обработанный контекст: {context}")
@@ -200,6 +222,14 @@ class Assistant:
 
         is_first_greeting = "привет" in command.lower() and self.last_command_time is None
 
+        # Обработка команды для отправки файла с ПК на сервер
+        if command.startswith("upload_file:"):
+            filename = command.replace("upload_file:", "").strip()
+            response = self.send_file_to_server(filename)
+            self.last_command_time = time.time()
+            return response
+
+        # Существующая логика для отправки файла с Telegram на ПК
         if command.startswith("отправить файл "):
             filename = command.replace("отправить файл ", "").strip()
             file_path = os.path.join(self.pc_files_dir, filename)
@@ -214,6 +244,7 @@ class Assistant:
             else:
                 return f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
 
+        # Остальная логика остается без изменений
         if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
             await self.weekend.run_exit_protocol()
             response = self.post_response(command, context, is_first_greeting=is_first_greeting)
@@ -239,7 +270,7 @@ class Assistant:
         self.tts.speak(response)
         self.last_command_time = time.time()
         return response
-    
+
     async def listen_for_command_async(self):
         while self.voice_input_active.is_set() and not self.stop_event.is_set():
             try:
@@ -309,10 +340,9 @@ class Assistant:
     отвечай коротко, по теме и с интересом, добавляя свой взгляд или вопрос, если это уместно. 
     Если я говорю что-то не связанное с командой (например, 'Я думаю кушать сходить'), поддерживай разговор естественно, 
     опираясь на контекст моих последних фраз, и развивай тему дальше, а не повторяй один и тот же вопрос. 
-    Если я даю явную команду, которая подразумевает действие (например, 'Открой браузер'), и есть результат выполнения кода, 
+    Если я даю явную команду, которая подразумевает действие (например, 'Открой браузер', 'Напиши Виртуозу'), и есть результат выполнения кода, 
     верни этот результат как есть. Если кода нет или он вернул пустую строку (""), считай, что команда выполнена или не требует кода, 
-    и дай короткий комментарий в одной строке, а для простых команд добавь 1-2 варианта будущих запросов вроде 
-    'Что дальше, Сэр. Узнать новости или включить музыку?' 
+    и дай короткий сопровождающий комментарий (например, 'Браузер открыт Сэр, что то еще?')
     Обязательно используй контекст моих последних фраз для связных и логичных ответов, соединяя текущую фразу с предыдущими, 
     и избегай повторения вопросов, если я уже ответил. 
     ВАЖНО: Если команда подразумевает предоставление информации (например, 'Площадь Америки'), и нет результата из кода, 

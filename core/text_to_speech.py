@@ -7,7 +7,7 @@ from pygame import mixer
 import time
 import sys
 
-BASE_URL = "http://147.45.78.163:8000"  
+BASE_URL = "http://46.29.160.114:8000"  
 
 def format_for_speech(data):
     if isinstance(data, dict):

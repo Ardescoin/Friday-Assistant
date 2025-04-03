@@ -21,4 +21,5 @@ def close_all_programs(self):
                 except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
                     print(f"Ошибка при закрытии окна")
                     
+     
 """
