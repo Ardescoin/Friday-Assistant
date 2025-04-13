@@ -1,8 +1,16 @@
 import requests
 import g4f
 import time
+import sys
+import os
 
-with open('modules\prompt.txt', 'r', encoding='utf-8') as file:
+def resource_path(relative_path):
+    """ Получить путь к ресурсу (работает и в .py, и в .exe) """
+    if getattr(sys, 'frozen', False):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
+
+with open(resource_path('modules/prompt.txt'), 'r', encoding='utf-8') as file:
     main_prompt = file.read()
 
 
@@ -79,7 +87,7 @@ def get_gpt_response(command):
 
 def save_code_to_file(code):
     try:
-        with open("generated_code.py", "w", encoding="utf-8") as file:
+        with open(resource_path("generated_code.py"), "w", encoding="utf-8") as file:
             file.write(code)
     except Exception as e:
         print(f"Ошибка при сохранении кода в файл: {e}")

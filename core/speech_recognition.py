@@ -6,12 +6,19 @@ import pyaudio
 import os
 import logging
 import time
+import sys
+import os
+
+def resource_path(relative_path):
+    if getattr(sys, 'frozen', False):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-MODEL_PATH = "vosk"  
+MODEL_PATH = resource_path("vosk") 
 CHUNK = 1024
 FORMAT = pyaudio.paInt16
 CHANNELS = 1
@@ -30,7 +37,7 @@ except Exception as e:
     exit(1)
 
 class SpeechRecognition:
-    def __init__(self, device_index=2):
+    def __init__(self, device_index=1):
         self.rec = KaldiRecognizer(model, RATE)
         self.p = pyaudio.PyAudio()
         self.stream = None
@@ -41,7 +48,6 @@ class SpeechRecognition:
         self._initialize_stream()
 
     def _initialize_stream(self):
-        """Инициализация аудиопотока с проверкой устройства"""
         if self.stream is not None:
             self.stream.close()
             self.stream = None
@@ -68,7 +74,6 @@ class SpeechRecognition:
             raise
 
     def _listen_loop(self):
-        """Цикл прослушивания микрофона"""
         self.running.set()
         logger.info("Запуск потока прослушивания")
         while self.running.is_set():
@@ -92,9 +97,9 @@ class SpeechRecognition:
                 logger.error(f"Ошибка в потоке прослушивания: {e}")
                 self.running.clear()  
                 break
+    
 
     def start_listening(self):
-        """Запуск прослушивания в фоновом потоке"""
         if not self.running.is_set():
             try:
                 if not self.stream or not self.stream.is_active():
@@ -108,7 +113,6 @@ class SpeechRecognition:
             logger.warning("Прослушивание уже запущено")
 
     def stop_listening(self):
-        """Остановка прослушивания"""
         if self.running.is_set():
             self.running.clear()
             if self.listen_thread and self.listen_thread.is_alive():
@@ -123,14 +127,12 @@ class SpeechRecognition:
         self.command_queue.put(None)
 
     def get_command(self):
-        """Получение команды из очереди"""
         try:
             return self.command_queue.get_nowait()  
         except queue.Empty:
             return None
 
     def __del__(self):
-        """Очистка ресурсов при уничтожении объекта"""
         self.stop_listening()
         if hasattr(self, 'p') and self.p is not None:
             self.p.terminate()

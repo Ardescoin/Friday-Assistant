@@ -7,19 +7,7 @@ import screen_brightness_control as sbc
 import win32gui
 import win32con
 import win32process
-import sys
-import ctypes
 
-def is_admin():
-    try:
-        return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
-        return False
-
-if not is_admin():
-    print("Запуск от имени администратора...")
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
-    sys.exit()
 
 
 SAFE_PROCESSES = ["python.exe", "explorer.exe", "Spotify.exe"]
