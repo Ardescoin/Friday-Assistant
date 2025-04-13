@@ -6,7 +6,7 @@ from modules.gpt import get_gpt_response
 from modules.additional import add
 from modules.protocols import Weekend
 from modules.protocols import Work
-import customtkinter as ctk
+import datetime 
 import aiohttp
 import asyncio
 import sys
@@ -155,7 +155,7 @@ class Assistant:
             await self.fetch_pending_files()
             await asyncio.sleep(10)
 
-    # В класс Assistant добавляем новую функцию
+    
     def send_file_to_server(self, filename):
         file_path = os.path.join(self.pc_files_dir, filename)
         if os.path.exists(file_path):
@@ -176,7 +176,7 @@ class Assistant:
             print(f"Файл {filename} не найден в {self.pc_files_dir}")
             return f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
 
-# Обновляем process_command для обработки команды upload_file
+
     async def process_command(self, command):
         if not command or not command.strip():
             return None
@@ -230,14 +230,14 @@ class Assistant:
 
         is_first_greeting = "привет" in command.lower() and self.last_command_time is None
 
-        # Обработка команды для отправки файла с ПК на сервер
+        
         if command.startswith("upload_file:"):
             filename = command.replace("upload_file:", "").strip()
             response = self.send_file_to_server(filename)
             self.last_command_time = time.time()
             return response
 
-        # Существующая логика для отправки файла с Telegram на ПК
+        
         if command.startswith("отправить файл "):
             filename = command.replace("отправить файл ", "").strip()
             file_path = os.path.join(self.pc_files_dir, filename)
@@ -252,7 +252,7 @@ class Assistant:
             else:
                 return f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
 
-        # Остальная логика остается без изменений
+        
         if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
             await self.weekend.run_exit_protocol()
             response = self.post_response(command, context, is_first_greeting=is_first_greeting)
@@ -335,9 +335,10 @@ class Assistant:
             raise e
 
     def post_response(self, command, context, is_command=False, generated_output=None, is_first_greeting=False):
-        import datetime
+
         date = datetime.datetime.now().strftime("%H:%M:%S")
         day = datetime.datetime.now().strftime("%A")
+
         full_prompt = f"""
     Ты голосовой ассистент женского пола по имени Пятница — энергичная, дружелюбная и немного остроумная собеседница. 
     Твоя цель — вести естественный, живой диалог, отвечая на вопросы, поддерживая разговор и реагируя на команды. 
@@ -368,19 +369,21 @@ class Assistant:
     Контекст моих последних фраз (используй его для связности ответа):\n{context}\n
     Моя текущая фраза: {command}\n
     Это мой первый контакт с приветствием: {is_first_greeting}\n
-    Здесь дополнительная информация: {add}\n
     Текущее время: {date}. День недели: {day}
-    """
+        """
 
-        if generated_output and generated_output != "":  
+        if generated_output and generated_output != "":
             response = str(generated_output) if not isinstance(generated_output, str) else generated_output
-        else:  
-            unique_prompt = f"{full_prompt}. Время запроса: {time.time()}."
-            response = g4f.ChatCompletion.create(
-                model=g4f.models.llama_3_1_405b,
-                messages=[{'role': 'user', 'content': unique_prompt}]
-            )
-            response = response.strip()
+        else:
+            try:
+                unique_prompt = f"{full_prompt}. Время запроса: {time.time()}."
+                response = g4f.ChatCompletion.create(
+                    model=g4f.models.gpt_4o,
+                    messages=[{'role': 'user', 'content': unique_prompt}]
+                )
+                response = response.strip()
+            except Exception as e:
+                response = f"Сэр, возникла ошибка при генерации ответа: {e}"
 
         data = {
             "command": command,
@@ -395,7 +398,8 @@ class Assistant:
             print(f"Ошибка при записи в базу: {e}")
 
         return response
-    
+
+        
 
     def on_quit(self, icon=None):
         self.stop_event.set()
