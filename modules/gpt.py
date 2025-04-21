@@ -53,7 +53,7 @@ def get_gpt_response(command):
 
         
         gpt_response = g4f.ChatCompletion.create(
-            model=g4f.models.gpt_4o_mini,
+            model=g4f.models.gpt_4o,
             messages=[{'role': 'user', 'content': prompt}]
         )
 

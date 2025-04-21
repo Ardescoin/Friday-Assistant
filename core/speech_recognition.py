@@ -31,14 +31,14 @@ if not os.path.exists(MODEL_PATH):
 
 try:
     model = Model(MODEL_PATH)
-    logger.info("Модель Vosk успешно загружена")
 except Exception as e:
     logger.error(f"Ошибка загрузки модели: {e}")
     exit(1)
 
 class SpeechRecognition:
-    def __init__(self, device_index=1):
+    def __init__(self,  result_queue: queue.Queue, device_index=1):
         self.rec = KaldiRecognizer(model, RATE)
+        self.command_result_queue = result_queue
         self.p = pyaudio.PyAudio()
         self.stream = None
         self.device_index = device_index
@@ -68,14 +68,12 @@ class SpeechRecognition:
                 frames_per_buffer=CHUNK,
                 input_device_index=self.device_index
             )
-            logger.info(f"Микрофон инициализирован: {self.p.get_device_info_by_index(self.device_index)['name']}")
         except Exception as e:
             logger.error(f"Ошибка инициализации микрофона (устройство {self.device_index}): {e}")
             raise
 
     def _listen_loop(self):
         self.running.set()
-        logger.info("Запуск потока прослушивания")
         while self.running.is_set():
             try:
                 data = self.stream.read(CHUNK, exception_on_overflow=False)
@@ -88,13 +86,13 @@ class SpeechRecognition:
                             self.command_queue.put(None)
                             break
                         self.command_queue.put(text)
+                    self.command_result_queue.put(text)
                 else:
                     partial_result = json.loads(self.rec.PartialResult())
                     partial_text = partial_result.get("partial", "").strip()
                     if partial_text:
                         logger.debug(f"Частично: {partial_text}")
             except Exception as e:
-                logger.error(f"Ошибка в потоке прослушивания: {e}")
                 self.running.clear()  
                 break
     
@@ -106,7 +104,6 @@ class SpeechRecognition:
                     self._initialize_stream()
                 self.listen_thread = threading.Thread(target=self._listen_loop, daemon=True)
                 self.listen_thread.start()
-                logger.info("Прослушивание запущено в фоновом режиме")
             except Exception as e:
                 logger.error(f"Ошибка при запуске прослушивания: {e}")
         else:
@@ -136,7 +133,6 @@ class SpeechRecognition:
         self.stop_listening()
         if hasattr(self, 'p') and self.p is not None:
             self.p.terminate()
-            logger.info("PyAudio завершён")
 
 if __name__ == "__main__":
     

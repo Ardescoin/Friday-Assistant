@@ -3,9 +3,9 @@ import time
 import g4f
 import requests
 from modules.gpt import get_gpt_response
-from modules.additional import add
 from modules.protocols import Weekend
 from modules.protocols import Work
+from plyer import notification
 import datetime 
 import aiohttp
 import asyncio
@@ -23,7 +23,7 @@ class Assistant:
         self.stop_event = threading.Event()
         self.active = False
         self.listening_thread = None
-        self.dialogue_timeout = 30
+        self.dialogue_timeout = 15
         self.weekend = Weekend(self.tts)
         self.work = Work(self.tts)
         self.last_command_time = None
@@ -98,7 +98,6 @@ class Assistant:
                                 for retry in range(5):
                                     try:
                                         requests.post(f"{BASE_URL}/pc/response", json={"command_id": command_id, "response": bot_response}, timeout=10)
-                                        print(f"Ответ отправлен: {bot_response}")
                                         break
                                     except requests.exceptions.RequestException:
                                         if retry < 4:
@@ -214,7 +213,7 @@ class Assistant:
                                     if cmd not in seen_commands:
                                         unique_interactions.append((cmd, resp))
                                         seen_commands.add(cmd)
-                                unique_interactions = unique_interactions[:5]
+                                unique_interactions = unique_interactions[:10]
                                 context = "Контекст последних взаимодействий:\n" + \
                                         "\n".join(f"[{i+1}] Вы: {cmd} | Я: {resp}" for i, (cmd, resp) in enumerate(unique_interactions)) + "\n"
                             else:
@@ -275,9 +274,10 @@ class Assistant:
                 response = self.post_response(command, context, is_first_greeting=is_first_greeting)
 
         print(f"Ответ для бота: {response}")
+        notification.notify(title="Новое сообщение", message=response,  app_name="Friday", app_icon="ico/active.ico", timeout=10)
         self.tts.speak(response)
         self.last_command_time = time.time()
-        return response
+        return self.post_response(command, context, response=response, is_first_greeting=is_first_greeting)
 
     async def listen_for_command_async(self):
         while self.voice_input_active.is_set() and not self.stop_event.is_set():
@@ -334,7 +334,7 @@ class Assistant:
             print(f"Ошибка в execute_generated_code: {e}")
             raise e
 
-    def post_response(self, command, context, is_command=False, generated_output=None, is_first_greeting=False):
+    def post_response(self, command, context, response=None, is_first_greeting=False):
 
         date = datetime.datetime.now().strftime("%H:%M:%S")
         day = datetime.datetime.now().strftime("%A")
@@ -360,6 +360,7 @@ class Assistant:
     Не говори, что не можешь выполнить команду, если она звучит как действие, — предполагай успех.
 
     Если есть результат выполнения кода и он не пустой, возвращай только этот результат без дополнительных комментариев.
+    Виртуоз - мой друг
 
     Если команда подразумевает предоставление информации (например, 'Площадь Америки') и нет результата кода, 
     дай краткий ответ с известной тебе информацией или скажи: 'Сэр, точных данных у меня нет, но могу предположить...' 
@@ -372,23 +373,50 @@ class Assistant:
     Текущее время: {date}. День недели: {day}
         """
 
-        if generated_output and generated_output != "":
-            response = str(generated_output) if not isinstance(generated_output, str) else generated_output
+        # if generated_output and generated_output != "":
+        #     response = str(generated_output) if not isinstance(generated_output, str) else generated_output
+        # else:
+        #     try:
+        #         unique_prompt = f"{full_prompt}. Время запроса: {time.time()}."
+        #         response = g4f.ChatCompletion.create(
+        #             model=g4f.models.gpt_4o,
+        #             messages=[{'role': 'user', 'content': unique_prompt}]
+        #         )
+        #         response = response.strip()
+        #     except Exception as e:
+        #         response = f"Сэр, возникла ошибка при генерации ответа: {e}"
+
+        # data = {
+        #     "command": command,
+        #     "prompt": full_prompt,
+        #     "response": response
+        # }
+        # try:
+        #     with requests.post(f"{BASE_URL}/db/add_interaction", json=data, timeout=5) as api_response:
+        #         if api_response.status_code != 200:
+        #             print(f"Ошибка при записи в базу: {api_response.status_code}, {api_response.text}")
+        # except requests.exceptions.RequestException as e:
+        #     print(f"Ошибка при записи в базу: {e}")
+
+        # return response
+        if response is not None:
+            final_response = response
         else:
             try:
                 unique_prompt = f"{full_prompt}. Время запроса: {time.time()}."
-                response = g4f.ChatCompletion.create(
+                final_response = g4f.ChatCompletion.create(
                     model=g4f.models.gpt_4o,
                     messages=[{'role': 'user', 'content': unique_prompt}]
                 )
-                response = response.strip()
+                final_response = final_response.strip()
             except Exception as e:
-                response = f"Сэр, возникла ошибка при генерации ответа: {e}"
+                final_response = f"Сэр, возникла ошибка при генерации ответа: {e}"
 
+        # Записываем в базу данных
         data = {
             "command": command,
             "prompt": full_prompt,
-            "response": response
+            "response": final_response
         }
         try:
             with requests.post(f"{BASE_URL}/db/add_interaction", json=data, timeout=5) as api_response:
@@ -397,7 +425,7 @@ class Assistant:
         except requests.exceptions.RequestException as e:
             print(f"Ошибка при записи в базу: {e}")
 
-        return response
+        return final_response
 
         
 
@@ -416,5 +444,3 @@ class Assistant:
         
         if icon is not None:
             icon.stop()
-
-

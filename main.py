@@ -1,3 +1,8 @@
+import os
+os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
+
+from vosk import SetLogLevel
+SetLogLevel(-1)
 import threading
 import pystray
 from PIL import Image
@@ -8,8 +13,8 @@ from core.text_to_speech import TextToSpeech
 import customtkinter as ctk
 import sys
 import ctypes
-import os
 import queue
+
 
 def resource_path(relative_path):
     if getattr(sys, 'frozen', False):
@@ -32,10 +37,14 @@ if not is_admin():
     sys.exit()
 
 def main():
+    # hide_console()
+    from vosk import SetLogLevel
+    SetLogLevel(-1)
     
+    command_result_queue = queue.Queue()
     
 
-    sr = SpeechRecognition(device_index=1)
+    sr = SpeechRecognition( command_result_queue, device_index=1)
     tts = TextToSpeech()
     assistant = Assistant(sr, tts)
 
@@ -57,20 +66,24 @@ def main():
     output_text = ctk.CTkTextbox(master=root, width=350, height=100, font=("Arial", 12), state="disabled")
     output_text.pack(pady=10)
     
-    def update_text():
+    
+    
+    def update_output(text):
+        output_text.configure(state="normal")
+        output_text.delete("1.0", "end")
+        output_text.insert("1.0", text)
+        output_text.configure(state="disabled")
+
+    def poll_queue():
         try:
-            text = sr.command_queue.get_nowait() 
-            if text is not None:
-                output_text.configure(state="normal")  
-                output_text.insert("end", text + "\n")  
-                output_text.see("end")  
-                output_text.configure(state="disabled")  
-                print(f"Обновлено: {text}")  
+            while True:
+                response = command_result_queue.get_nowait()
+                update_output(response)
         except queue.Empty:
             pass
-        root.after(100, update_text)  
+        root.after(100, poll_queue)
 
-    update_text()
+    poll_queue()
 
     assistant.app = type('App', (), {'update_output': lambda text: [
         output_text.configure(state="normal"),

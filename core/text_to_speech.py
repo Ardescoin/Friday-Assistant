@@ -101,7 +101,6 @@ class TextToSpeech:
             try:
                 audio = self.recognizer.listen(source, timeout=5)
                 command = self.recognizer.recognize_google(audio, language='ru-RU')
-                print(f"Вы сказали: {command}")
                 return command.lower()
             except sr.UnknownValueError:
                 print("Не удалось распознать речь")
