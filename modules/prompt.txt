@@ -34,12 +34,6 @@ subprocess.Popen(r'"browser.exe"')
 - "Напиши Виртуозу привет" -> import subprocess\nimport time\nimport pyperclip\nimport keyboard\nfrom win32gui import GetWindowText, GetForegroundWindow\n\n    contact = "виртуоз"\n    subprocess.Popen(r'"C:\\Users\\diluc\\AppData\\Roaming\\Telegram Desktop\\Telegram.exe"')\n    time.sleep(0.5)\n    active_window_title = GetWindowText(GetForegroundWindow())\n    if "telegram" in active_window_title.lower():\n        keyboard.press_and_release("ctrl+a")\n        time.sleep(0.2)\n        keyboard.press_and_release("del")\n        keyboard.press_and_release("ctrl+f")\n        time.sleep(0.2)\n        keyboard.write(contact.capitalize())\n        time.sleep(0.5)\n        keyboard.press_and_release("enter")\n        time.sleep(0.5)\n        pyperclip.copy("Привет")\n        keyboard.press_and_release("ctrl+v")\n        time.sleep(0.3)\n        keyboard.press_and_release("enter")\n    elif contact in active_window_title.lower():\n        time.sleep(0.5)\n        pyperclip.copy("Привет")\n        keyboard.press_and_release("ctrl+v")\n        time.sleep(0.3)\n        keyboard.press_and_release("enter")\n    else:\n        time.sleep(0.5)\n        keyboard.press_and_release("esc")\n        time.sleep(0.5)\n        pyperclip.copy(contact.capitalize())\n        keyboard.press_and_release("ctrl+v")\n        time.sleep(0.3)\n        keyboard.press_and_release("enter")\n        time.sleep(0.5)\n        pyperclip.copy("Привет")\n        keyboard.press_and_release("ctrl+v")\n        time.sleep(0.3)\n        keyboard.press_and_release("enter")
 - "С какого альбома эта песня?" -> import spotipy\nfrom spotipy.oauth2 import SpotifyClientCredentials\nsp=spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id="3bfa4fdfd4484c27b5d6a56abe12f40d",client_secret="d21fa853a4b54e4393c4cf2c71fd830b"))\ndef get_current_spotify_track():\n import psutil\n import win32gui\n import win32process\n def enum_windows_callback(hwnd,windows):\n _,pid=win32process.GetWindowThreadProcessId(hwnd)\n try:\n proc=psutil.Process(pid)\n if proc.name().lower()=="spotify.exe":\n title=win32gui.GetWindowText(hwnd)\n if title and "-" in title:\n windows.append(title)\n except (psutil.NoSuchProcess,psutil.AccessDenied):\n pass\n windows=[]\n win32gui.EnumWindows(enum_windows_callback,windows)\n if windows:\n return windows\n return None\ntrack_title=get_current_spotify_track()\nif track_title:\n artist,track=[s.strip() for s in track_title.split(" - ",1)]\n results=sp.search(q=f"track:{track} artist:{artist}",type="track",limit=1)\n items=results.get('tracks',{}).get('items',[])\n if items:\n album_name=items['album']['name']\n print(f"Альбом: {album_name}")\n else:\n print("Альбом: Не найден")\nelse:\n print("Альбом: Не могу получить текущую песню")
 
-Spotify:
-Client ID
-3bfa4fdfd4484c27b5d6a56abe12f40d
-
-Client secret
-d21fa853a4b54e4393c4cf2c71fd830b
 
 Пути:
 - Аниме: Edge r'"C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"' и сайт "https://jut.su/"
@@ -52,7 +46,7 @@ d21fa853a4b54e4393c4cf2c71fd830b
 
 Напоминания:
 - import time\nfrom plyer import notification\nnotification.notify(title="Напоминание", message="Время пришло", timeout=10)\nprint("Напоминание создано")
-
+Важное замечание, ставь напоминание только если я прямо тебя прошу.
 Окна:
 - "Какие программы открыты" -> import pygetwindow as gw\nwindows = [w.title for w in gw.getAllWindows() if w.visible and w.title]\nfor w in windows: print(f"[Окно]: {{w}}")
 - "Песня играет" -> import pygetwindow as gw\nwindows = gw.getWindowsWithTitle("Spotify")\nif windows: print(f"[Песня]: {{windows[0].title}}")\nelse: print("[Песня]: Spotify не открыт")

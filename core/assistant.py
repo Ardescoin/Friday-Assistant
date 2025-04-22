@@ -373,32 +373,6 @@ class Assistant:
     Текущее время: {date}. День недели: {day}
         """
 
-        # if generated_output and generated_output != "":
-        #     response = str(generated_output) if not isinstance(generated_output, str) else generated_output
-        # else:
-        #     try:
-        #         unique_prompt = f"{full_prompt}. Время запроса: {time.time()}."
-        #         response = g4f.ChatCompletion.create(
-        #             model=g4f.models.gpt_4o,
-        #             messages=[{'role': 'user', 'content': unique_prompt}]
-        #         )
-        #         response = response.strip()
-        #     except Exception as e:
-        #         response = f"Сэр, возникла ошибка при генерации ответа: {e}"
-
-        # data = {
-        #     "command": command,
-        #     "prompt": full_prompt,
-        #     "response": response
-        # }
-        # try:
-        #     with requests.post(f"{BASE_URL}/db/add_interaction", json=data, timeout=5) as api_response:
-        #         if api_response.status_code != 200:
-        #             print(f"Ошибка при записи в базу: {api_response.status_code}, {api_response.text}")
-        # except requests.exceptions.RequestException as e:
-        #     print(f"Ошибка при записи в базу: {e}")
-
-        # return response
         if response is not None:
             final_response = response
         else:
@@ -412,7 +386,7 @@ class Assistant:
             except Exception as e:
                 final_response = f"Сэр, возникла ошибка при генерации ответа: {e}"
 
-        # Записываем в базу данных
+        
         data = {
             "command": command,
             "prompt": full_prompt,
