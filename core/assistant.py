@@ -6,12 +6,14 @@ from modules.gpt import get_gpt_response
 from modules.protocols import Weekend
 from modules.protocols import Work
 from plyer import notification
+from mutagen.mp3 import MP3
 import datetime 
 import aiohttp
 import asyncio
 import sys
 import io
 import os
+import glob
 
 BASE_URL = "http://46.29.160.114:8000"
 
@@ -23,14 +25,16 @@ class Assistant:
         self.stop_event = threading.Event()
         self.active = False
         self.listening_thread = None
-        self.dialogue_timeout = 15
+        self.dialogue_timeout = 10
         self.weekend = Weekend(self.tts)
         self.work = Work(self.tts)
         self.last_command_time = None
-        self.pc_files_dir = "D:\\Jarvis\\files"
+        self.pc_files_dir = "files"
+        self.image_dir = "generated_images"
         self.app = None
         
         os.makedirs(self.pc_files_dir, exist_ok=True)
+        os.makedirs(self.image_dir, exist_ok=True)
         print("База данных управляется сервером.")
         self.sr.start_listening()
         
@@ -175,14 +179,69 @@ class Assistant:
             print(f"Файл {filename} не найден в {self.pc_files_dir}")
             return f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
 
+    async def fetch_web_data(self, query):
+        async with aiohttp.ClientSession() as session:
+            if "погода" in query.lower():
+                city = "Kazan"
+                url = f"https://wttr.in/{city}?format=%C+%t+%w"
+                try:
+                    async with session.get(url, timeout=5) as response:
+                        if response.status == 200:
+                            return (await response.text()).strip()
+                        return "Сэр, не удалось получить данные о погоде. Чем ещё могу помочь?"
+                except aiohttp.ClientError as e:
+                    print(f"Ошибка подключения при запросе погоды: {str(e)}")
+                    return f"Ошибка подключения: {str(e)}"
+            return None
 
+    async def generate_image(self, prompt):
+        try:
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: g4f.Client().images.generate(
+                    model="dall-e-3",
+                    prompt=prompt
+                )
+            )
+            
+            image_files = glob.glob(os.path.join(self.image_dir, "*.png")) + \
+                         glob.glob(os.path.join(self.image_dir, "*.jpg")) + \
+                         glob.glob(os.path.join(self.image_dir, "*.jpeg"))
+            if not image_files:
+                print("No image files found in generated_images")
+                return None
+            
+            latest_image = max(image_files, key=os.path.getctime)
+            print(f"Found latest image: {latest_image}")
+            return latest_image
+        except Exception as e:
+            print(f"Ошибка генерации изображения: {str(e)}")
+            return None
+
+    def get_audio_duration(self, filepath):
+        audio = MP3(filepath)
+        return audio.info.length
+
+    def wait_and_set_timeout(self, filepath, check_interval=1, max_wait=30):
+        waited = 0
+        while not os.path.exists(filepath):
+            if waited >= max_wait:
+                print(f"Файл {filepath} не появился за {max_wait} секунд")
+                return False
+            time.sleep(check_interval)
+            waited += check_interval
+        duration = self.get_audio_duration(filepath)
+        self.dialogue_timeout = duration + 10
+        print(f"Таймаут установлен: {self.dialogue_timeout:.2f} секунд")
+        return True
+    
     async def process_command(self, command):
         if not command or not command.strip():
             return None
 
-        if self.last_command_time is not None and (time.time() - self.last_command_time) >= self.dialogue_timeout:
-            self.last_command_time = None
+        self.last_command_time = time.time()
 
+        
         context = "Контекст недоступен.\n"
         async with aiohttp.ClientSession() as session:
             try:
@@ -213,7 +272,7 @@ class Assistant:
                                     if cmd not in seen_commands:
                                         unique_interactions.append((cmd, resp))
                                         seen_commands.add(cmd)
-                                unique_interactions = unique_interactions[:10]
+                                unique_interactions = unique_interactions[:5]
                                 context = "Контекст последних взаимодействий:\n" + \
                                         "\n".join(f"[{i+1}] Вы: {cmd} | Я: {resp}" for i, (cmd, resp) in enumerate(unique_interactions)) + "\n"
                             else:
@@ -228,15 +287,54 @@ class Assistant:
                 print(f"Ошибка соединения с сервером при получении контекста: {e}")
 
         is_first_greeting = "привет" in command.lower() and self.last_command_time is None
+        is_image_command = any(keyword in command.lower() for keyword in ["сгенерируй", "нарисуй"])
+        is_weather_command = "погода" in command.lower()
 
-        
+        if is_image_command:
+            image_prompt = command
+            image_path = await self.generate_image(image_prompt)
+            if image_path and os.path.exists(image_path):
+                response = f"Сэр, изображение по запросу '{image_prompt}' создано! Хотите, чтобы я описала его?"
+                try:
+                    os.remove(image_path)
+                    print(f"Изображение удалено: {image_path}")
+                except Exception as e:
+                    print(f"Ошибка удаления изображения: {str(e)}")
+            else:
+                response = "Сэр, не удалось сгенерировать изображение. Может, попробуем ещё раз?"
+            notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+            self.tts.speak(response)
+            
+            if self.wait_and_set_timeout('output.mp3'):
+                self.last_command_time = time.time()
+            else:
+                self.dialogue_timeout = 10  
+            return self.post_response(command, context, response=response, is_first_greeting=is_first_greeting)
+
+        if is_weather_command:
+            web_data = await self.fetch_web_data(command)
+            response = self.post_response(command, context, web_data=web_data, is_first_greeting=is_first_greeting)
+            notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+            self.tts.speak(response)
+            
+            if self.wait_and_set_timeout('output.mp3'):
+                self.last_command_time = time.time()
+            else:
+                self.dialogue_timeout = 10  
+            return response
+
         if command.startswith("upload_file:"):
             filename = command.replace("upload_file:", "").strip()
             response = self.send_file_to_server(filename)
-            self.last_command_time = time.time()
+            notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+            self.tts.speak(response)
+            
+            if self.wait_and_set_timeout('output.mp3'):
+                self.last_command_time = time.time()
+            else:
+                self.dialogue_timeout = 10  
             return response
 
-        
         if command.startswith("отправить файл "):
             filename = command.replace("отправить файл ", "").strip()
             file_path = os.path.join(self.pc_files_dir, filename)
@@ -245,40 +343,70 @@ class Assistant:
                     files = {"file": (filename, f, "application/octet-stream")}
                     response = requests.post(f"{BASE_URL}/pc/receive_file", files=files, timeout=10)
                 if response.status_code == 200:
-                    return f"Файл {filename} готов к отправке в Telegram"
+                    response = f"Файл {filename} готов к отправке в Telegram"
                 else:
-                    return f"Ошибка загрузки файла на сервер: {response.status_code}"
+                    response = f"Ошибка загрузки файла на сервер: {response.status_code}"
             else:
-                return f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
+                response = f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
+            notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+            self.tts.speak(response)
+            
+            if self.wait_and_set_timeout('output.mp3'):
+                self.last_command_time = time.time()
+            else:
+                self.dialogue_timeout = 10  
+            return response
 
-        
         if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
             await self.weekend.run_exit_protocol()
             response = self.post_response(command, context, is_first_greeting=is_first_greeting)
-        elif "протокол рабочий" in command.lower() or "рабочий протокол" in command.lower():
+            notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+            self.tts.speak(response)
+            
+            if self.wait_and_set_timeout('output.mp3'):
+                self.last_command_time = time.time()
+            else:
+                self.dialogue_timeout = 10  
+            return response
+
+        if "протокол рабочий" in command.lower() or "рабочий протокол" in command.lower():
             await self.work.run_exit_protocol()
             response = self.post_response(command, context, is_first_greeting=is_first_greeting)
-        else:
-            generated_code = get_gpt_response(command)
-            if generated_code and generated_code.strip():
-                try:
-                    output = self.execute_generated_code(generated_code)
-                    if output:
-                        response = output
-                    else:
-                        response = self.post_response(command, context, is_first_greeting=is_first_greeting)
-                except Exception as e:
-                    print(f"Ошибка при выполнении кода: {e}")
-                    response = self.post_response(command, context, generated_output=f"Ошибка: {str(e)}", is_first_greeting=is_first_greeting)
+            notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+            self.tts.speak(response)
+            
+            if self.wait_and_set_timeout('output.mp3'):
+                self.last_command_time = time.time()
             else:
-                response = self.post_response(command, context, is_first_greeting=is_first_greeting)
+                self.dialogue_timeout = 10  
+            return response
+
+        
+        generated_code = get_gpt_response(command)
+        if generated_code and generated_code.strip():
+            try:
+                output = self.execute_generated_code(generated_code)
+                if output:
+                    response = output
+                else:
+                    response = self.post_response(command, context, is_first_greeting=is_first_greeting)
+            except Exception as e:
+                print(f"Ошибка при выполнении кода: {e}")
+                response = self.post_response(command, context, generated_output=f"Ошибка: {str(e)}", is_first_greeting=is_first_greeting)
+        else:
+            response = self.post_response(command, context, is_first_greeting=is_first_greeting)
 
         print(f"Ответ для бота: {response}")
-        notification.notify(title="Новое сообщение", message=response,  app_name="Friday", app_icon="ico/active.ico", timeout=10)
+        notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
         self.tts.speak(response)
-        self.last_command_time = time.time()
-        return self.post_response(command, context, response=response, is_first_greeting=is_first_greeting)
+        
+        if self.wait_and_set_timeout('output.mp3'):
+            self.last_command_time = time.time()
+        else:
+            self.dialogue_timeout = 10  
 
+        return response
+    
     async def listen_for_command_async(self):
         while self.voice_input_active.is_set() and not self.stop_event.is_set():
             try:
@@ -334,59 +462,42 @@ class Assistant:
             print(f"Ошибка в execute_generated_code: {e}")
             raise e
 
-    def post_response(self, command, context, response=None, is_first_greeting=False):
-
+    def post_response(self, command, context, response=None, web_data=None, is_first_greeting=False):
         date = datetime.datetime.now().strftime("%H:%M:%S")
         day = datetime.datetime.now().strftime("%A")
 
         full_prompt = f"""
-    Ты голосовой ассистент женского пола по имени Пятница — энергичная, дружелюбная и немного остроумная собеседница. 
-    Твоя цель — вести естественный, живой диалог, отвечая на вопросы, поддерживая разговор и реагируя на команды. 
-    Обращайся ко мне как 'Сэр', будь неформальной и тёплой, используй женский род (например, 'рада', 'помогла', 'узнала'). 
+    Ты голосовой ассистент Пятница, женского пола, энергичная и дружелюбная. Обращайся ко мне как 'Сэр', будь неформальной, используй женский род. Веди живой диалог, отвечая на вопросы и команды, поддерживая разговор по контексту: {context}.
 
-    Если это мой первый контакт и я здороваюсь (например, 'Привет, Пятница'), отвечай в духе приветствия: 
-    'Привет, Сэр. Рада вас слышать.' и добавь лёгкий вопрос или комментарий для продолжения беседы. 
-    В последующих ответах не повторяй приветствие, а продолжай разговор.
+    Если это первый контакт с приветствием ({is_first_greeting}), отвечай: 'Привет, Сэр. Рада вас слышать.' и добавь лёгкий вопрос. Иначе продолжай беседу.
 
-    Если я задаю вопрос (например, 'Как дела?', 'Что думаешь о картошке?', 'Площадь Америки') и нет результата кода, 
-    отвечай коротко, по теме и с интересом, добавляя свой взгляд или вопрос, если уместно. 
-    Если я говорю что-то не связанное с командой (например, 'Я думаю кушать сходить'), поддерживай разговор естественно, 
-    опираясь на контекст моих последних фраз, и развивай тему дальше, избегая повторения одних и тех же вопросов.
+    Если запрос связан с погодой (например, 'погода сейчас'), используй данные из web_data как источник истины.
+    Формат web_data: '<условия> <температура> <скорость ветра>', например, 'ясно +15°C 5 м/с'.
+    Если web_data отсутствует или содержит ошибку, скажи: 'Сэр, не удалось получить данные о погоде. Чем ещё могу помочь?'
+    Помни что твои ответы должны быть комментарием к уже выполенной команды, если мой ответ подразумевает команду.
 
-    Если я даю команду, которая звучит как действие (например, 'Открой браузер', 'Запусти калькулятор', 'Напиши Виртуозу'), 
-    и нет результата выполнения кода (или код вернул пустую строку), считай, что команда успешно выполнена, 
-    и отвечай коротко и позитивно, например: 'Сэр, браузер открыт, что-то ещё?' или 'Сэр, всё готово, что дальше?'. 
-    Извлекай суть действия из команды (например, 'браузер' или 'калькулятор') и используй её в ответе для естественности. 
-    Не говори, что не можешь выполнить команду, если она звучит как действие, — предполагай успех.
+    На вопросы (например, 'Как дела?', 'Площадь Америки') без результата кода отвечай коротко, по теме, с интересом. На разговорные фразы (например, 'Я думаю кушать сходить') реагируй естественно, развивая тему. Виртуоз — мой друг.
 
-    Если есть результат выполнения кода и он не пустой, возвращай только этот результат без дополнительных комментариев.
-    Виртуоз - мой друг
+    На команды-действия (например, 'Открой браузер') без результата кода или с пустым результатом отвечай позитивно, предполагая успех: 'Сэр, браузер открыт, что ещё?'.
 
-    Если команда подразумевает предоставление информации (например, 'Площадь Америки') и нет результата кода, 
-    дай краткий ответ с известной тебе информацией или скажи: 'Сэр, точных данных у меня нет, но могу предположить...' 
-    и предложи разумное значение или уточнение.
+    На команды с информацией (например, 'Площадь Америки') без результата кода дай краткий ответ или: 'Сэр, точных данных нет, но могу предположить...'.
 
-    Отвечай без дополнительного форматирования текста, без восклицательных знаков, в естественной и лаконичной форме. 
-    Контекст моих последних фраз (используй его для связности ответа):\n{context}\n
-    Моя текущая фраза: {command}\n
-    Это мой первый контакт с приветствием: {is_first_greeting}\n
-    Текущее время: {date}. День недели: {day}
+    Если есть непустой результат кода, возвращай только его. Отвечай лаконично, без форматирования. Текущее время: {date}. День недели: {day}. Моя фраза: {command}. Данные из интернета: {web_data}.
         """
 
         if response is not None:
             final_response = response
         else:
             try:
-                unique_prompt = f"{full_prompt}. Время запроса: {time.time()}."
+                unique_prompt = f"{full_prompt}. Время запроса: {time.time()}.".encode('utf-8').decode('utf-8')
                 final_response = g4f.ChatCompletion.create(
-                    model=g4f.models.gpt_4o,
+                    model="gpt-4o",
                     messages=[{'role': 'user', 'content': unique_prompt}]
                 )
                 final_response = final_response.strip()
             except Exception as e:
                 final_response = f"Сэр, возникла ошибка при генерации ответа: {e}"
 
-        
         data = {
             "command": command,
             "prompt": full_prompt,
@@ -401,7 +512,6 @@ class Assistant:
 
         return final_response
 
-        
 
     def on_quit(self, icon=None):
         self.stop_event.set()

@@ -1,4 +1,3 @@
-import speech_recognition as sr
 import threading
 import queue
 import requests
@@ -7,7 +6,7 @@ from pygame import mixer
 import time
 import sys
 
-BASE_URL = "http://46.29.160.114:8000"  
+BASE_URL = "http://46.29.160.114:8000"
 
 def format_for_speech(data):
     if isinstance(data, dict):
@@ -27,7 +26,6 @@ def format_for_speech(data):
 class TextToSpeech:
     def __init__(self):
         self.lock = threading.Lock()
-        self.recognizer = sr.Recognizer()
         self.is_speaking = False
         self.speech_queue = queue.Queue()
         self.current_thread = None
@@ -95,20 +93,6 @@ class TextToSpeech:
         if response:
             self.speak(response)
 
-    def listen(self):
-        with sr.Microphone() as source:
-            self.recognizer.adjust_for_ambient_noise(source)
-            try:
-                audio = self.recognizer.listen(source, timeout=5)
-                command = self.recognizer.recognize_google(audio, language='ru-RU')
-                return command.lower()
-            except sr.UnknownValueError:
-                print("Не удалось распознать речь")
-                return None
-            except sr.RequestError:
-                print("Ошибка при обращении к сервису распознавания")
-                return None
-            
     def redirect_output(self):
         self.output_handler = TTSOutput(self, self.original_stdout)
         sys.stdout = self.output_handler
@@ -119,14 +103,14 @@ class TextToSpeech:
             self.output_handler.flush()
             has_spoken = self.output_handler.has_spoken
         sys.stdout = self.original_stdout
-        return has_spoken  
+        return has_spoken
 
 class TTSOutput:
     def __init__(self, tts, original_stdout):
         self.tts = tts
         self.original_stdout = original_stdout
         self.buffer = ""
-        self.has_spoken = False  
+        self.has_spoken = False
 
     def write(self, text):
         self.original_stdout.write(text)
@@ -141,7 +125,7 @@ class TTSOutput:
             except (ValueError, SyntaxError):
                 formatted_text = self.buffer.strip()
             self.tts.speak_response(formatted_text)
-            self.has_spoken = True  
+            self.has_spoken = True
             self.buffer = ""
 
     def __getattr__(self, attr):

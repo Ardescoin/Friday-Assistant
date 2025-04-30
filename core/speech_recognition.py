@@ -36,7 +36,7 @@ except Exception as e:
     exit(1)
 
 class SpeechRecognition:
-    def __init__(self,  result_queue: queue.Queue, device_index=1):
+    def __init__(self,  result_queue: queue.Queue, device_index=2):
         self.rec = KaldiRecognizer(model, RATE)
         self.command_result_queue = result_queue
         self.p = pyaudio.PyAudio()
@@ -133,19 +133,3 @@ class SpeechRecognition:
         self.stop_listening()
         if hasattr(self, 'p') and self.p is not None:
             self.p.terminate()
-
-if __name__ == "__main__":
-    
-    sr = SpeechRecognition(device_index=1)
-    sr.start_listening()
-    try:
-        while True:
-            command = sr.get_command()
-            if command is None:
-                break
-            if command:
-                print(f"Получена команда: {command}")
-            time.sleep(0.1)  
-    except KeyboardInterrupt:
-        sr.stop_listening()
-        print("Программа завершена")

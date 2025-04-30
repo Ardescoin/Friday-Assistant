@@ -1,8 +1,8 @@
 import os
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = '1'
 
-from vosk import SetLogLevel
-SetLogLevel(-1)
+# from vosk import SetLogLevel
+# SetLogLevel(-1)
 import threading
 import pystray
 from PIL import Image
@@ -38,13 +38,10 @@ if not is_admin():
 
 def main():
     # hide_console()
-    from vosk import SetLogLevel
-    SetLogLevel(-1)
-    
     command_result_queue = queue.Queue()
     
 
-    sr = SpeechRecognition( command_result_queue, device_index=1)
+    sr = SpeechRecognition( command_result_queue, device_index=2)
     tts = TextToSpeech()
     assistant = Assistant(sr, tts)
 
@@ -52,10 +49,10 @@ def main():
     listener_thread.start()
 
     ctk.set_appearance_mode("dark")
-    ctk.set_default_color_theme("blue")
+    ctk.set_default_color_theme("green")
     
     root = ctk.CTk()
-    root.title("Голосовой Ассистент")
+    root.title("Friday")
     root.geometry("400x200")
     
     root.resizable(width=False, height=False)
