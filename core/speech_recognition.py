@@ -36,7 +36,7 @@ except Exception as e:
     exit(1)
 
 class SpeechRecognition:
-    def __init__(self,  result_queue: queue.Queue, device_index=2):
+    def __init__(self,  result_queue: queue.Queue, device_index=1):
         self.rec = KaldiRecognizer(model, RATE)
         self.command_result_queue = result_queue
         self.p = pyaudio.PyAudio()

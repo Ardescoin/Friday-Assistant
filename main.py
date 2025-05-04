@@ -41,7 +41,7 @@ def main():
     command_result_queue = queue.Queue()
     
 
-    sr = SpeechRecognition( command_result_queue, device_index=2)
+    sr = SpeechRecognition( command_result_queue, device_index=1)
     tts = TextToSpeech()
     assistant = Assistant(sr, tts)
 

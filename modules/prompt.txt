@@ -27,7 +27,7 @@ subprocess.Popen(r'"browser.exe"')
     - "Состояние компьютера" -> import psutil\nbattery = psutil.sensors_battery()\nmemory = psutil.virtual_memory()\nprint(f"[Заряд]: {{battery.percent if battery else 'Нет батареи'}}%")\nprint(f"[Нагрузка памяти]: {{memory.percent}}%")\nprint(f"[RAM]: {{memory.used / 1024**3:.2f}} / {{memory.total / 1024**3:.2f}} ГБ")
     - "Поставь напоминание" -> import time\ndef reminder():\n    print("Напоминание!")\ntime.sleep(5)\nreminder()
     - "Открой КиноПоиск топ 250 фильмов и листай вниз до фильма Иынтерстеллар" -> import webbrowser\nimport pytesseract\nimport pyautogui\nimport time\npytesseract.pytesseract.tesseract_cmd = r'C:\\Program Files\\Tesseract-OCR\\tesseract.exe'\ndef open_and_scroll_to_movie():\n    webbrowser.open("https://www.kinopoisk.ru/lists/top250/")\n    time.sleep(5)\n    while True:\n        screen = pyautogui.screenshot()\n        text = pytesseract.image_to_string(screen, lang='rus+eng')\n        if "Интерстеллар" in text:\n            break\n        pyautogui.scroll(-500)\n        time.sleep(0.3)\nopen_and_scroll_to_movie()
-
+    - "Какие фильмы ты посоветуешь?" -> ""
 Пути:
     - Браузер: Browser r'"C:\\Program Files\\Yandex\\YandexBrowser\\Application\\browser.exe"'
     - VPN: AmnesiaVPN r'"C:\\Program Files\\AmneziaVPN"'
