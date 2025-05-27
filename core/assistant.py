@@ -10,12 +10,14 @@ from mutagen.mp3 import MP3
 import datetime 
 import aiohttp
 import asyncio
+import json
 import sys
 import io
 import os
 import glob
 
 BASE_URL = "http://46.29.160.114:8000"
+PATHS_JSON = "file_paths.json"
 
 class Assistant:
     def __init__(self, speech_recognition, text_to_speech):
@@ -32,6 +34,7 @@ class Assistant:
         self.pc_files_dir = "files"
         self.image_dir = "generated_images"
         self.app = None
+        
         
         os.makedirs(self.pc_files_dir, exist_ok=True)
         os.makedirs(self.image_dir, exist_ok=True)
@@ -235,13 +238,203 @@ class Assistant:
         print(f"Таймаут установлен: {self.dialogue_timeout:.2f} секунд")
         return True
     
+    # async def process_command(self, command):
+    #     if not command or not command.strip():
+    #         return None
+
+    #     self.last_command_time = time.time()
+
+        
+    #     context = "Контекст недоступен.\n"
+    #     async with aiohttp.ClientSession() as session:
+    #         try:
+    #             async with session.get(f"{BASE_URL}/db/get_interactions", params={"limit": 10}, timeout=5) as response:
+    #                 if response.status == 200:
+    #                     raw_context = await response.text()
+    #                     try:
+    #                         context_data = await response.json()
+    #                         context_str = context_data.get("context", "Контекст пока пуст")
+    #                         if context_str != "Контекст пока пуст":
+    #                             lines = context_str.split("\n")
+    #                             recent_interactions = []
+    #                             i = 0
+    #                             while i < len(lines) - 1:
+    #                                 user_cmd = None
+    #                                 assistant_resp = None
+    #                                 if lines[i].startswith("Пользователь: "):
+    #                                     user_cmd = lines[i].replace("Пользователь: ", "").strip()
+    #                                     i += 1
+    #                                     if i < len(lines) and lines[i].startswith("Пятница: "):
+    #                                         assistant_resp = lines[i].replace("Пятница: ", "").strip()
+    #                                 if user_cmd and assistant_resp:
+    #                                     recent_interactions.append((user_cmd, assistant_resp))
+    #                                 i += 1
+    #                             unique_interactions = []
+    #                             seen_commands = set()
+    #                             for cmd, resp in recent_interactions[::-1]:
+    #                                 if cmd not in seen_commands:
+    #                                     unique_interactions.append((cmd, resp))
+    #                                     seen_commands.add(cmd)
+    #                             unique_interactions = unique_interactions[:5]
+    #                             context = "Контекст последних взаимодействий:\n" + \
+    #                                     "\n".join(f"[{i+1}] Вы: {cmd} | Я: {resp}" for i, (cmd, resp) in enumerate(unique_interactions)) + "\n"
+    #                         else:
+    #                             context = "Контекст пока пуст.\n"
+    #                         print(f"Обработанный контекст: {context}")
+    #                     except ValueError as e:
+    #                         print(f"Ошибка парсинга JSON контекста: {e}")
+    #                         context = f"Ошибка формата данных от сервера: {raw_context}\n"
+    #                 else:
+    #                     print(f"Ошибка при получении контекста: {response.status}, текст: {await response.text()}")
+    #         except aiohttp.ClientError as e:
+    #             print(f"Ошибка соединения с сервером при получении контекста: {e}")
+
+    #     is_first_greeting = "привет" in command.lower() and self.last_command_time is None
+    #     is_image_command = any(keyword in command.lower() for keyword in ["сгенерируй", "нарисуй"])
+    #     is_weather_command = "погода" in command.lower()
+
+    #     if is_image_command:
+    #         image_prompt = command
+    #         image_path = await self.generate_image(image_prompt)
+    #         if image_path and os.path.exists(image_path):
+    #             response = f"Сэр, изображение по запросу '{image_prompt}' создано! Хотите, чтобы я описала его?"
+    #             try:
+    #                 os.remove(image_path)
+    #                 print(f"Изображение удалено: {image_path}")
+    #             except Exception as e:
+    #                 print(f"Ошибка удаления изображения: {str(e)}")
+    #         else:
+    #             response = "Сэр, не удалось сгенерировать изображение. Может, попробуем ещё раз?"
+    #         notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+    #         self.tts.speak(response)
+            
+    #         if self.wait_and_set_timeout('output.mp3'):
+    #             self.last_command_time = time.time()
+    #         else:
+    #             self.dialogue_timeout = 10  
+    #         return self.post_response(command, context, response=response, is_first_greeting=is_first_greeting)
+
+    #     if is_weather_command:
+    #         web_data = await self.fetch_web_data(command)
+    #         response = self.post_response(command, context, web_data=web_data, is_first_greeting=is_first_greeting)
+    #         notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+    #         self.tts.speak(response)
+            
+    #         if self.wait_and_set_timeout('output.mp3'):
+    #             self.last_command_time = time.time()
+    #         else:
+    #             self.dialogue_timeout = 10  
+    #         return response
+
+    #     if command.startswith("upload_file:"):
+    #         filename = command.replace("upload_file:", "").strip()
+    #         response = self.send_file_to_server(filename)
+    #         notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+    #         self.tts.speak(response)
+            
+    #         if self.wait_and_set_timeout('output.mp3'):
+    #             self.last_command_time = time.time()
+    #         else:
+    #             self.dialogue_timeout = 10  
+    #         return response
+
+    #     if command.startswith("отправить файл "):
+    #         filename = command.replace("отправить файл ", "").strip()
+    #         file_path = os.path.join(self.pc_files_dir, filename)
+    #         if os.path.exists(file_path):
+    #             with open(file_path, "rb") as f:
+    #                 files = {"file": (filename, f, "application/octet-stream")}
+    #                 response = requests.post(f"{BASE_URL}/pc/receive_file", files=files, timeout=10)
+    #             if response.status_code == 200:
+    #                 response = f"Файл {filename} готов к отправке в Telegram"
+    #             else:
+    #                 response = f"Ошибка загрузки файла на сервер: {response.status_code}"
+    #         else:
+    #             response = f"Сэр, файл {filename} не найден в {self.pc_files_dir}"
+    #         notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+    #         self.tts.speak(response)
+            
+    #         if self.wait_and_set_timeout('output.mp3'):
+    #             self.last_command_time = time.time()
+    #         else:
+    #             self.dialogue_timeout = 10  
+    #         return response
+
+    #     if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
+    #         await self.weekend.run_exit_protocol()
+    #         response = self.post_response(command, context, is_first_greeting=is_first_greeting)
+    #         notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+    #         self.tts.speak(response)
+            
+    #         if self.wait_and_set_timeout('output.mp3'):
+    #             self.last_command_time = time.time()
+    #         else:
+    #             self.dialogue_timeout = 10  
+    #         return response
+
+    #     if "протокол рабочий" in command.lower() or "рабочий протокол" in command.lower():
+    #         await self.work.run_exit_protocol()
+    #         response = self.post_response(command, context, is_first_greeting=is_first_greeting)
+    #         notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+    #         self.tts.speak(response)
+            
+    #         if self.wait_and_set_timeout('output.mp3'):
+    #             self.last_command_time = time.time()
+    #         else:
+    #             self.dialogue_timeout = 10  
+    #         return response
+
+        
+    #     generated_code = get_gpt_response(command)
+    #     if generated_code and generated_code.strip():
+    #         try:
+    #             output = self.execute_generated_code(generated_code)
+    #             if output:
+    #                 response = output
+    #             else:
+    #                 response = self.post_response(command, context, is_first_greeting=is_first_greeting)
+    #         except Exception as e:
+    #             print(f"Ошибка при выполнении кода: {e}")
+    #             response = self.post_response(command, context, generated_output=f"Ошибка: {str(e)}", is_first_greeting=is_first_greeting)
+    #     else:
+    #         response = self.post_response(command, context, is_first_greeting=is_first_greeting)
+
+    #     print(f"Ответ для бота: {response}")
+    #     notification.notify(title="Новое сообщение", message=response, app_name="Friday", app_icon="ico/active.ico", timeout=10)
+    #     self.tts.speak(response)
+        
+    #     if self.wait_and_set_timeout('output.mp3'):
+    #         self.last_command_time = time.time()
+    #     else:
+    #         self.dialogue_timeout = 10  
+
+    #     return response
+    def load_paths_from_json(input_file):
+        """Загружает пути из JSON-файла"""
+        if not os.path.exists(input_file):
+            print(f"Файл {input_file} не найден")
+            return {}
+        with open(input_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def find_program_path(program_name, paths):
+        """Ищет путь к программе по имени"""
+        program_name = program_name.lower().strip()
+        # Точный поиск
+        if program_name in paths:
+            return paths[program_name]
+        # Нечеткий поиск
+        for name, path in paths.items():
+            if program_name in name:
+                return path
+        return None
+    
     async def process_command(self, command):
         if not command or not command.strip():
             return None
 
         self.last_command_time = time.time()
 
-        
         context = "Контекст недоступен.\n"
         async with aiohttp.ClientSession() as session:
             try:
@@ -308,7 +501,7 @@ class Assistant:
             if self.wait_and_set_timeout('output.mp3'):
                 self.last_command_time = time.time()
             else:
-                self.dialogue_timeout = 10  
+                self.dialogue_timeout = 10
             return self.post_response(command, context, response=response, is_first_greeting=is_first_greeting)
 
         if is_weather_command:
@@ -320,7 +513,7 @@ class Assistant:
             if self.wait_and_set_timeout('output.mp3'):
                 self.last_command_time = time.time()
             else:
-                self.dialogue_timeout = 10  
+                self.dialogue_timeout = 10
             return response
 
         if command.startswith("upload_file:"):
@@ -332,7 +525,7 @@ class Assistant:
             if self.wait_and_set_timeout('output.mp3'):
                 self.last_command_time = time.time()
             else:
-                self.dialogue_timeout = 10  
+                self.dialogue_timeout = 10
             return response
 
         if command.startswith("отправить файл "):
@@ -354,7 +547,7 @@ class Assistant:
             if self.wait_and_set_timeout('output.mp3'):
                 self.last_command_time = time.time()
             else:
-                self.dialogue_timeout = 10  
+                self.dialogue_timeout = 10
             return response
 
         if "протокол выходной" in command.lower() or "выходной протокол" in command.lower():
@@ -366,7 +559,7 @@ class Assistant:
             if self.wait_and_set_timeout('output.mp3'):
                 self.last_command_time = time.time()
             else:
-                self.dialogue_timeout = 10  
+                self.dialogue_timeout = 10
             return response
 
         if "протокол рабочий" in command.lower() or "рабочий протокол" in command.lower():
@@ -378,10 +571,10 @@ class Assistant:
             if self.wait_and_set_timeout('output.mp3'):
                 self.last_command_time = time.time()
             else:
-                self.dialogue_timeout = 10  
+                self.dialogue_timeout = 10
             return response
 
-        
+        # Обработка всех остальных команд через нейросеть
         generated_code = get_gpt_response(command)
         if generated_code and generated_code.strip():
             try:
@@ -403,7 +596,7 @@ class Assistant:
         if self.wait_and_set_timeout('output.mp3'):
             self.last_command_time = time.time()
         else:
-            self.dialogue_timeout = 10  
+            self.dialogue_timeout = 10
 
         return response
     

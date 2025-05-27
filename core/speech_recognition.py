@@ -6,6 +6,7 @@ import pyaudio
 import os
 import logging
 import time
+import numpy as np
 import sys
 import os
 
@@ -46,6 +47,28 @@ class SpeechRecognition:
         self.running = threading.Event()
         self.listen_thread = None
         self._initialize_stream()
+        self.VOLUME_THRESHOLD = 0.01
+
+    def _calculate_rms(self, data):
+        try:
+            if not data:  
+                logger.debug("Пустой аудиофрейм, RMS не вычислен")
+                return 0.0
+            
+            audio_data = np.frombuffer(data, dtype=np.int16)
+            if audio_data.size == 0:  
+                logger.debug("Пустой массив аудиоданных, RMS не вычислен")
+                return 0.0
+            
+            mean_square = np.mean(audio_data**2)
+            if np.isnan(mean_square) or mean_square < 0:  
+                logger.debug(f"Некорректное значение mean_square: {mean_square}")
+                return 0.0
+            
+            return np.sqrt(mean_square)
+        except Exception as e:
+            logger.error(f"Ошибка при вычислении RMS: {e}")
+            return 0.0
 
     def _initialize_stream(self):
         if self.stream is not None:
@@ -77,6 +100,9 @@ class SpeechRecognition:
         while self.running.is_set():
             try:
                 data = self.stream.read(CHUNK, exception_on_overflow=False)
+                rms = self._calculate_rms(data)
+                if rms < self.VOLUME_THRESHOLD:
+                    continue
                 if self.rec.AcceptWaveform(data):
                     result = json.loads(self.rec.Result())
                     text = result.get("text", "").strip()
