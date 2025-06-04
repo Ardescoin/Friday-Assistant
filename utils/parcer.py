@@ -15,46 +15,45 @@ SEARCH_DIRS = [
 
 OUTPUT_JSON = "file_paths.json"
 
+import os
+
 def scan_directories(dirs):
-    """Сканирует директории и собирает пути к .exe файлам"""
     paths = {}
     for directory in dirs:
         if not os.path.exists(directory):
             print(f"Папка {directory} не существует")
             continue
+        
+        dir_name = os.path.basename(directory).lower()
+        paths[dir_name] = {"path": directory, "type": "directory"} 
+        
         for root, _, files in os.walk(directory):
             for file in files:
-                if file.endswith(".exe"):
-                    
+                if file.lower().endswith(".exe"):
                     program_name = os.path.splitext(file)[0].lower()
                     full_path = os.path.join(root, file)
-                    paths[program_name] = full_path
+                    if program_name not in paths:
+                        paths[program_name] = {"path": full_path, "type": "file"}
     return paths
 
+
 def save_paths_to_json(paths, output_file):
-    """Сохраняет пути в JSON-файл"""
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(paths, f, ensure_ascii=False, indent=4)
-    print(f"Пути сохранены в {output_file}")
 
 def load_paths_from_json(input_file):
-    """Загружает пути из JSON-файла"""
     if not os.path.exists(input_file):
-        print(f"Файл {input_file} не найден")
         return {}
     with open(input_file, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def find_program_path(program_name, paths):
-    """Ищет путь к программе по имени"""
-    program_name = program_name.lower().strip()
-    
-    if program_name in paths:
-        return paths[program_name]
-    
-    for name, path in paths.items():
-        if program_name in name:
-            return path
+def find_program_path(name, paths):
+    name = name.lower().strip()
+    if name in paths:
+        return paths[name]["path"] if isinstance(paths[name], dict) and "path" in paths[name] else paths[name]
+    for k, v in paths.items():
+        if name in k:
+            return v["path"] if isinstance(v, dict) and "path" in v else v
     return None
 
 def main():

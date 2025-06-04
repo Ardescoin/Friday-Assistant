@@ -1,16 +1,18 @@
 import asyncio
-import time
 import pytz
 from datetime import datetime
-import g4f
 import requests
 import aiohttp
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from mtranslate import translate
 import os
 import logging
 import glob
+import uuid
+import g4f  # Added import for g4f library
 
+# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -24,10 +26,12 @@ class TelegramBot:
         logger.info("Начало инициализации TelegramBot")
         self.application = Application.builder().token(TOKEN).build()
         self.pc_active = False
-        self.g4f_client = g4f.Client()  
-        self.image_dir = "generated_images"  
-        os.makedirs(self.image_dir, exist_ok=True)  
-        logger.info("Application и g4f клиент созданы")
+        self.image_dir = "generated_images"
+        os.makedirs(self.image_dir, exist_ok=True)
+        self.api_key = "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"
+        self.api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-3.5-large-turbo"
+        self.g4f_client = g4f.Client()  # Initialize g4f client
+        logger.info("Application, клиент Stable Diffusion и g4f созданы")
         
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_message))
         self.application.add_handler(MessageHandler(filters.Document.ALL, self.handle_file))
@@ -60,7 +64,7 @@ class TelegramBot:
                 try:
                     async with session.get(url, timeout=5) as response:
                         if response.status == 200:
-                            return (await response.text()).strip()  
+                            return (await response.text()).strip()
                         return "Не удалось получить данные о погоде"
                 except aiohttp.ClientError as e:
                     logger.error(f"Ошибка подключения при запросе погоды: {str(e)}")
@@ -70,7 +74,7 @@ class TelegramBot:
     async def get_context(self):
         async with aiohttp.ClientSession() as session:
             try:
-                async with session.get(f"{BASE_URL}/db/get_interactions", params={"limit": 10}, timeout=5) as response:
+                async with session.get(f"{BASE_URL}/db/get_interactions", params={"limit": 5}, timeout=5) as response:
                     if response.status == 200:
                         context_data = await response.json()
                         context_str = context_data.get("context", "Контекст пока пуст")
@@ -93,7 +97,7 @@ class TelegramBot:
                                 if user_cmd and assistant_resp:
                                     recent_interactions.append((user_cmd, assistant_resp, image_prompt))
                                 i += 1
-                            unique_interactions = list(dict.fromkeys((cmd, resp, img_p) for cmd, resp, img_p in recent_interactions[::-1]))[:25]
+                            unique_interactions = list(dict.fromkeys((cmd, resp, img_p) for cmd, resp, img_p in recent_interactions[::-1]))[:5]
                             context = "Контекст последних взаимодействий:\n"
                             for i, (cmd, resp, img_p) in enumerate(unique_interactions):
                                 context += f"[{i+1}] Вы: {cmd} | Я: {resp}"
@@ -114,28 +118,45 @@ class TelegramBot:
                 logger.error(f"Ошибка парсинга JSON: {str(e)}")
                 return "Ошибка формата данных от сервера.\n"
 
-    async def generate_image(self, prompt):
+    async def clear_image_dir(self):
+        for file in glob.glob(os.path.join(self.image_dir, "*")):
+            os.remove(file)
+        logger.info("Image directory cleared")
+        
+    async def translate_prompt(self, prompt):
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.g4f_client.images.generate(
-                    model="dall-e-3",  
-                    prompt=prompt
-                )
-            )
-            
-            image_files = glob.glob(os.path.join(self.image_dir, "*.png")) + \
-                         glob.glob(os.path.join(self.image_dir, "*.jpg")) + \
-                         glob.glob(os.path.join(self.image_dir, "*.jpeg"))
-            if not image_files:
-                logger.error("No image files found in generated_images")
-                return None
-            
-            latest_image = max(image_files, key=os.path.getctime)
-            logger.info(f"Found latest image: {latest_image}")
-            return latest_image
+            prompt = translate(prompt, "en", "auto")
+            return prompt
         except Exception as e:
-            logger.error(f"Ошибка генерации изображения: {str(e)}")
+            logger.error(f"Ошибка перевода: {str(e)}")
+            return prompt
+
+    async def generate_image(self, prompt):
+        translated_prompt = await self.translate_prompt(prompt)
+        try:
+            await self.clear_image_dir()
+            logger.info(f"Генерация: {translated_prompt}")
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self.api_url,
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={"inputs": translated_prompt}
+                ) as response:
+                    if response.status == 200:
+                        image_bytes = await response.read()
+                        if len(image_bytes) == 0:
+                            logger.error("Картинка пуста")
+                            return None
+                        image_path = os.path.join(self.image_dir, f"{uuid.uuid4()}.png")
+                        with open(image_path, "wb") as f:
+                            f.write(image_bytes)
+                        logger.info(f"Сохранено: {image_path}")
+                        return image_path
+                    else:
+                        logger.error(f"API ошибка: {response.status}, {await response.text()}")
+                        return None
+        except Exception as e:
+            logger.error(f"Ошибка генерации: {str(e)}")
             return None
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -149,8 +170,8 @@ class TelegramBot:
         is_image_command = any(keyword in command_lower for keyword in ["сгенерируй", "нарисуй"])
         
         if is_image_command:
-            image_prompt = command
-            
+            image_prompt = command_lower.replace("сгенерируй", "").replace("нарисуй", "").strip()
+            logger.info(f"Обработанный image_prompt: {image_prompt}")
             image_path = await self.generate_image(image_prompt)
             if image_path and os.path.exists(image_path):
                 response_text = f"Сэр, вот ваше изображение! Что скажете?"
@@ -158,10 +179,8 @@ class TelegramBot:
                     with open(image_path, "rb") as photo:
                         await update.message.reply_photo(photo=photo, caption=response_text)
                     logger.info(f"Изображение отправлено: {image_path}")
-                    
                     os.remove(image_path)
                     logger.info(f"Изображение удалено: {image_path}")
-                    
                     await self.post_response(command, message_context, image_prompt=image_prompt)
                 except Exception as e:
                     logger.error(f"Ошибка отправки изображения: {str(e)}")
@@ -309,12 +328,11 @@ class TelegramBot:
         timezone = pytz.timezone('Europe/Moscow')
         moscow_time = datetime.now(timezone).strftime("%Y-%m-%d %H:%M:%S")
         
-        if not response:  
+        if not response:
             full_prompt = (
                 "Ты голосовой ассистент по имени Пятница — энергичный, дружелюбный и немного остроумный собеседник. "
                 "Твоя цель — вести естественный, живой диалог, отвечая на вопросы, поддерживая разговор и реагируя на команды. "
                 "Обращайся ко мне как 'Сэр', будь неформальной и тёплой. "
-                "Никогда не начинай ответ с приветствия вроде 'Привет, Сэр' или 'Здравствуйте', даже если я сказал 'привет'. "
                 "Обязательно используй контекст моих последних фраз для связных и логичных ответов. "
                 "ВАЖНО: Если запрос связан с погодой (например, 'погода сейчас'), используй данные из web_data как источник истины. "
                 "Формат web_data: '<условия> <температура> <скорость ветра>', например, 'ясно +15°C 5 м/с'. "
