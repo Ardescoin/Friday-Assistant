@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
-API_TOKEN = "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" 
+API_TOKEN = "" 
 API_URL = "https://api-inference.huggingface.co/models/openai/whisper-large-v3"
 headers = {
     "Authorization": f"Bearer {API_TOKEN}",

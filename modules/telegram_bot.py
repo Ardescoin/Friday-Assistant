@@ -28,7 +28,7 @@ class TelegramBot:
         self.pc_active = False
         self.image_dir = "generated_images"
         os.makedirs(self.image_dir, exist_ok=True)
-        self.api_key = "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"
+        self.api_key = ""
         self.api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-3.5-large-turbo"
         self.g4f_client = g4f.Client()  # Initialize g4f client
         logger.info("Application, клиент Stable Diffusion и g4f созданы")

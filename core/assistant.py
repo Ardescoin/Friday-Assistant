@@ -35,7 +35,7 @@ class Assistant:
         self.pc_files_dir = "files"
         self.image_dir = "generated_images"
         self.app = None
-        self.api_key = "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"
+        self.api_key = ""
         self.api_url = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-3.5-large-turbo"
         
         os.makedirs(self.pc_files_dir, exist_ok=True)
